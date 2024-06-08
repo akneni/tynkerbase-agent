@@ -82,6 +82,7 @@ impl FileCollection {
 
         Ok(res)
     }
+    
     pub fn save(self, output_dir: &str) -> Result<(), String> {
         // Given a dictionary of paths and their content in bytes as well as the path for the parent 
         // directory, this function will create all the files on the disk.

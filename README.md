@@ -1,8 +1,8 @@
-# Tynkerer Cloud Services - Agent App
+# TynkerBase - Agent App
 **The cloud, in the palm of your hand**
 
 ## Overview
-The Agent App is a core component of the Tynkerer Cloud Services (TCS) project. It runs on various devices, enabling the deployment and management of cloud services on inexpensive hardware like Raspberry Pi, Intel NUC, repurposed laptops, or even smartphones. The Agent App allows users to push code to these devices, dockerize it, and deploy it seamlessly.
+The Agent App is a core component of the TynkerBase project. It runs on various devices, enabling the deployment and management of cloud services on inexpensive hardware like Raspberry Pi, repurposed laptops, or even smartphones (work in progress). The Agent App allows users to push code to these devices, dockerize it, and deploy it seamlessly.
 
 ## Features
 
