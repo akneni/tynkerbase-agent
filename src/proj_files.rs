@@ -1,6 +1,7 @@
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use anyhow::{anyhow, Result};
 use std::env::consts::OS;
 
 const PROJ_PATH_LINUX: &str = "/tynkerbase-projects";
@@ -40,12 +41,13 @@ impl FileCollection {
     pub fn new() -> Self {
         FileCollection{files: vec![]}
     }
-    pub fn from_bytes(mut vec: Vec<u8>) -> Result<Self, String> {
+
+    pub fn from_bytes(mut vec: Vec<u8>) -> Result<Self> {
         let mut res = FileCollection::new();
 
-        while (vec.len() > 0) {
+        while vec.len() > 0 {
             if vec.len() < 8 {
-                return Err("Invalid bytes".to_string());
+                return Err(anyhow!("Invalid bytes"));
             }
 
             // get length of file binary contents
@@ -71,7 +73,7 @@ impl FileCollection {
             vec.truncate(vec.len()-s_len);
             let string = match String::from_utf8(string){
                 Ok(s) => s,
-                Err(e) => return Err(format!("Error decoding string: {}", e)),
+                Err(e) => return Err(anyhow!("Error decoding string: {}", e)),
             };
 
             res.push(
@@ -83,7 +85,7 @@ impl FileCollection {
         Ok(res)
     }
     
-    pub fn save(self, output_dir: &str) -> Result<(), String> {
+    pub fn save(self, output_dir: &str) -> Result<()> {
         // Given a dictionary of paths and their content in bytes as well as the path for the parent 
         // directory, this function will create all the files on the disk.
         // If an error occurs, the function will stop copying the files to the disk and return the error
@@ -98,33 +100,33 @@ impl FileCollection {
                     let res = std::fs::create_dir_all(&parent)
                         .map_err(|e| e.to_string());
                     if res.is_err() {
-                        return res;
+                        return Err(anyhow!("{:?}", res));
                     }
                 }
             }
     
             let mut outfile = match fs::File::create(&full_path) {
                 Ok(f) => f,
-                Err(e) => return Err(e.to_string()),
+                Err(e) => return Err(anyhow!("{}", e)),
             };
             let res = outfile.write_all(&data);
             if res.is_err() {
-                return res.map_err(|e| e.to_string());
+                return res.map_err(|e| anyhow!("{}", e));
             }
         }
 
         Ok(())
     }    
 
-    pub fn load(parent_dir: &str, ignore: &Vec<String>) -> Result<Self, String> {
+    pub fn load(parent_dir: &str, ignore: &Vec<String>) -> Result<Self> {
         let mut res = FileCollection{files:vec![]};
     
         let parent_dir_path = Path::new(parent_dir);
         if parent_dir_path.is_file() {
-            return Err("Argument must be a directory, not a file.".to_string());
+            return Err(anyhow!("Argument must be a directory, not a file."));
         }
         let it = fs::read_dir(parent_dir_path)
-            .map_err(|s| s.to_string())?;
+            .map_err(|s| anyhow!("{}", s))?;
     
         for new_file in it {
             if let Ok(new_file) = new_file {
@@ -142,13 +144,13 @@ impl FileCollection {
                 if new_file.path().is_dir() {
                     let mut rec_res = match Self::load(&full_path_str, ignore) {
                         Ok(r) => r,
-                        Err(e) => return Err(format!("recursive call failed: {}", e)),
+                        Err(e) => return Err(anyhow!("recursive call failed: {}", e)),
                     };
                     res.append(&mut rec_res);
                     
                 }
                 else {
-                    let bytes = fs::read(&full_path_str).map_err(|e| e.to_string())?;
+                    let bytes = fs::read(&full_path_str).map_err(|e| anyhow!("{}", e))?;
                     res.push(FileData::from(full_path_str, bytes));
                 }
             }
@@ -173,7 +175,7 @@ impl FileCollection {
             }
         }
     
-        for mut ign in ignore.iter() {
+        for ign in ignore.iter() {
             if &full_path_str == ign {
                 return false;
             }
@@ -236,29 +238,23 @@ impl FileCollection {
 }
 
 
-pub fn create_proj(name: &str) -> String {
+pub fn create_proj(name: &str) -> Result<String> {
     if OS == "linux" {
-        return format!("/{PROJ_PATH_LINUX}/{name}");
+        return Ok(format!("/{PROJ_PATH_LINUX}/{name}"));
     }
-    else {
-        panic!("OS `{}` is unsupported", OS);
-    }
-    "".to_string()
+    Err(anyhow!("OS `{}` is unsupported", OS))
 }
 
-pub fn add_files_to_proj(name: &str, files: FileCollection) -> Result<(), String>{
+pub fn add_files_to_proj(name: &str, files: FileCollection) -> Result<()> {
     if !get_proj_names().contains(&name.to_string()) {
-        return Err(format!("Project `{}` does not exist.", {name}));
+        return Err(anyhow!("Project `{}` does not exist.", {name}));
     }
 
     if OS == "linux" {
         let proj_path = format!("/{PROJ_PATH_LINUX}/{name}");
         files.save(&proj_path);
     }
-    else {
-        panic!("OS `{}` is unsupported", OS);
-    }
-    Ok(())
+    Err(anyhow!("OS `{}` is unsupported", OS))
 }
 
 pub fn get_proj_names() -> Vec<String> {
@@ -281,20 +277,20 @@ pub fn get_proj_names() -> Vec<String> {
     }
 }
 
-pub fn delete_proj(name: &str) -> Result<(), String> {
+pub fn delete_proj(name: &str) -> Result<()> {
     if OS == "linux" {
         let path = format!("/{PROJ_PATH_LINUX}/{name}");
         if !Path::new(&path).exists() {
-            return Err("Project does not exist".to_string());
+            return Err(anyhow!("Project does not exist"));
         }
         if let Err(e) = fs::remove_dir_all(path) {
-            return Err(e.to_string());
+            return Err(anyhow!("{}", e));
         }
     }
     Ok(())
 }
 
-pub fn clear_proj(name: &str) -> Result<(), String> {
+pub fn clear_proj(name: &str) -> Result<()> {
     let res = delete_proj(name);
     if res.is_err() {
         return res;
