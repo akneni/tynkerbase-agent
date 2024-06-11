@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{anyhow, Result};
 use std::env::consts::OS;
 
-const PROJ_PATH_LINUX: &str = "/tynkerbase-projects";
+const LINUX_TYNKERBASE_PATH: &str = "/tynkerbase-projects";
 
 #[derive(Debug)]
 pub struct FileData {
@@ -240,7 +240,15 @@ impl FileCollection {
 
 pub fn create_proj(name: &str) -> Result<String> {
     if OS == "linux" {
-        return Ok(format!("/{PROJ_PATH_LINUX}/{name}"));
+        let path_str = format!("/{LINUX_TYNKERBASE_PATH}/{name}");
+        let path = Path::new(&path_str);
+        if !Path::exists(&path) {
+            return Err(anyhow!("Project `{}` already exists", name));
+        }
+        if let Err(e) = fs::create_dir(&path) {
+            return Err(anyhow!("Error creating dir: `{}`", e));
+        }
+        return Ok(format!("Created `/{LINUX_TYNKERBASE_PATH}/{name}`"));
     }
     Err(anyhow!("OS `{}` is unsupported", OS))
 }
@@ -251,8 +259,10 @@ pub fn add_files_to_proj(name: &str, files: FileCollection) -> Result<()> {
     }
 
     if OS == "linux" {
-        let proj_path = format!("/{PROJ_PATH_LINUX}/{name}");
-        files.save(&proj_path);
+        let proj_path = format!("/{LINUX_TYNKERBASE_PATH}/{name}");
+        if let Err(e) = files.save(&proj_path) {
+            return Err(anyhow!("{}", e));
+        }
     }
     Err(anyhow!("OS `{}` is unsupported", OS))
 }
@@ -260,7 +270,7 @@ pub fn add_files_to_proj(name: &str, files: FileCollection) -> Result<()> {
 pub fn get_proj_names() -> Vec<String> {
     // traverses the tynkerbase-projects directory to get all the names of all the folders
     // (which should each contain a project)
-    let projects = fs::read_dir(format!("{PROJ_PATH_LINUX}"));
+    let projects = fs::read_dir(format!("{LINUX_TYNKERBASE_PATH}"));
     match projects {
         Ok(projects) => {
             let mut res = vec![];
@@ -279,7 +289,7 @@ pub fn get_proj_names() -> Vec<String> {
 
 pub fn delete_proj(name: &str) -> Result<()> {
     if OS == "linux" {
-        let path = format!("/{PROJ_PATH_LINUX}/{name}");
+        let path = format!("/{LINUX_TYNKERBASE_PATH}/{name}");
         if !Path::new(&path).exists() {
             return Err(anyhow!("Project does not exist"));
         }
@@ -295,6 +305,20 @@ pub fn clear_proj(name: &str) -> Result<()> {
     if res.is_err() {
         return res;
     }
-    create_proj(name);
+    let res = create_proj(name);
+    if let Err(e) = res {
+        return Err(anyhow!("{}", e));
+    }
     Ok(())
+}
+
+pub fn load_proj_files(name: &str, ignore: Option<&Vec<String>>) -> Result<FileCollection> {
+    let path_str = format!("/{}/{}", LINUX_TYNKERBASE_PATH, name);
+    let empty_vec: Vec<String> = vec![];
+    let ignore = ignore.unwrap_or(&empty_vec);
+
+    match FileCollection::load(&path_str, &ignore) {
+        Ok(fc) => Ok(fc),
+        Err(e) => Err(e),
+    }
 }
