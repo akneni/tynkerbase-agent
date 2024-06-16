@@ -57,6 +57,14 @@ impl AgentResponse {
     fn cl_err_from(x: impl Debug) -> Self {
         Self::ClientErr(format!("{:?}", x))
     }
+
+    fn to_bytes(&self) -> Vec<u8> {
+        bincode::serialize(&self).unwrap()
+    }
+
+    fn from_bytes(v: &Vec<u8>) -> Self {
+        bincode::deserialize(v).unwrap()
+    }
 }
 
 // Implement the `rocket::response::Responder` trait for this enum so it can be returned as an object
@@ -84,24 +92,24 @@ impl<'r> Responder<'r, 'static> for AgentResponse {
 }
 
 #[rocket::post("/create-proj?<name>", data="<data>")]
-async fn create_proj(name: &str, data: Vec<u8>, state: &State<GlobalStateMx>) -> AgentResponse {
+async fn create_proj(name: &str, data: Vec<u8>, state: &State<GlobalStateMx>) -> Vec<u8> {
     let lock = state.lock().unwrap();
     let packet = parse_req(&data, &lock.rsa_keys, Some(&lock.api_key));
     drop(lock);
     let _packet = match packet {
         Ok(p) => p,
-        Err(e) => return AgentResponse::cl_err_from(e),
+        Err(e) => return AgentResponse::cl_err_from(e).to_bytes(),
     };
 
     let res = proj_utils::create_proj(name);
     if let Err(e) = res {
         if e.to_string().contains("already exists") {
-            return AgentResponse::cl_err_from(e);
+            return AgentResponse::cl_err_from(e).to_bytes();
         }
-        return AgentResponse::ag_err_from(e);
+        return AgentResponse::ag_err_from(e).to_bytes();
     }
 
-    AgentResponse::ok_from("success")
+    AgentResponse::ok_from("success").to_bytes()
 }
 
 #[rocket::post("/add-files-to-proj?<name>", data = "<data>")]
