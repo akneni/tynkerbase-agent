@@ -23,11 +23,12 @@ use rocket::{
     State,
 };
 use serde::{Deserialize, Serialize};
-use std::fmt::Debug;
+use std::{fmt::Debug, path};
 use std::{
     sync::{Arc, Mutex},
     fs,
     path::Path,
+    io::{self, Write},
 };
 use rsa::{
     pkcs1::{DecodeRsaPublicKey, EncodeRsaPublicKey}, 
@@ -335,11 +336,33 @@ fn rocket() -> _ {
             .unwrap();
     }
 
+    // generate new rsa keys
     let rsa_keys = RsaKeys::new();
+
+    // handle api keys
+    let path = Path::new("./api-key.bin");
+    let mut api_key = String::new();
+    if !path.exists() {
+        print!("Enter your API key: ");    // Prompt
+        io::stdout().flush().unwrap();  // Flushes output buffer
+
+        io::stdin().read_line(&mut api_key).expect("Failed to read line.");
+
+        if !api_key.starts_with("tyb_key_") || api_key.len() < 64 {
+            panic!("Incorrect format");
+        }
+
+        fs::write("./api-key.bin", &api_key)
+            .unwrap();
+    }
+    else {
+        api_key = fs::read_to_string("api-key.bin")
+            .unwrap();
+    }
 
     let state = Arc::new(Mutex::new(GlobalState { 
         rsa_keys: rsa_keys,
-        api_key: "placeholder".to_string(),
+        api_key: api_key,
     }));
 
     rocket::build()
