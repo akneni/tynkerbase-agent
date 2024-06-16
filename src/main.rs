@@ -1,15 +1,11 @@
 use tynkerbase_universal::{
     crypt_utils::{
         compression_utils, 
-        rsa_utils, 
         BinaryPacket, 
-        CompressionType, 
-        RsaKeys
     }, 
     docker_utils, 
     proj_utils::{self, FileCollection}
 };
-
 use bincode;
 use rocket::{
     self,
@@ -23,17 +19,12 @@ use rocket::{
     State,
 };
 use serde::{Deserialize, Serialize};
-use std::{fmt::Debug, path};
+use std::fmt::Debug;
 use std::{
     sync::{Arc, Mutex},
     fs,
     path::Path,
     io::{self, Write},
-};
-use rsa::{
-    pkcs1::{DecodeRsaPublicKey, EncodeRsaPublicKey}, 
-    RsaPrivateKey, 
-    RsaPublicKey,
 };
 use anyhow::{anyhow, Result};
 
@@ -90,17 +81,25 @@ impl<'r> Responder<'r, 'static> for AgentResponse {
         }
     }
 }
+struct ApiKey(String);
 
-#[rocket::post("/create-proj?<name>", data="<data>")]
-async fn create_proj(name: &str, data: Vec<u8>, state: &State<GlobalStateMx>) -> Vec<u8> {
-    let lock = state.lock().unwrap();
-    let packet = parse_req(&data, &lock.rsa_keys, Some(&lock.api_key));
-    drop(lock);
-    let _packet = match packet {
-        Ok(p) => p,
-        Err(e) => return AgentResponse::cl_err_from(e).to_bytes(),
-    };
+#[rocket::async_trait]
+impl<'a> FromRequest<'a> for ApiKey {
+    type Error = ();
 
+    async fn from_request(req: &'a Request<'_>) -> request::Outcome<Self, Self::Error> {
+        let target = fs::read_to_string("./keys/api-key.txt")
+            .unwrap();
+
+        match req.headers().get_one("tyb-api-key") {
+            Some(key) if key == &target => Outcome::Success(ApiKey(key.to_string())),
+            _ => Outcome::Error((Status::Forbidden, ())),
+        }
+    }
+}
+
+#[rocket::post("/create-proj?<name>")]
+async fn create_proj(name: &str, #[allow(unused)] apikey: ApiKey) -> Vec<u8> {
     let res = proj_utils::create_proj(name);
     if let Err(e) = res {
         if e.to_string().contains("already exists") {
@@ -116,19 +115,11 @@ async fn create_proj(name: &str, data: Vec<u8>, state: &State<GlobalStateMx>) ->
 async fn add_files_to_proj(
     name: &str,
     data: Vec<u8>,
-    state: &State<GlobalStateMx>,
-) -> AgentResponse {
-
-    let lock = state.lock().unwrap();
-    let packet = parse_req(&data, &lock.rsa_keys, Some(&lock.api_key));
-    drop(lock);
-    let packet = match packet {
-        Ok(p) => p,
-        Err(e) => return AgentResponse::cl_err_from(e),
-    };
-    
+    #[allow(unused)] apikey: ApiKey,
+) -> AgentResponse {   
     let _ = proj_utils::clear_proj(&name);
-
+    
+    let packet: BinaryPacket = bincode::deserialize(&data).unwrap();
     let files: FileCollection = bincode::deserialize(&packet.data).unwrap();
 
     if let Err(e) = proj_utils::add_files_to_proj(name, files) {
@@ -138,15 +129,8 @@ async fn add_files_to_proj(
     AgentResponse::ok_from("success")
 }
 
-#[rocket::post("/delete-proj?<name>", data="<data>")]
-async fn delete_proj(name: &str, data: Vec<u8>, state: &State<GlobalStateMx>) -> AgentResponse {
-    let lock = state.lock().unwrap();
-    let in_packet = parse_req(&data, &lock.rsa_keys, Some(&lock.api_key));
-    drop(lock);
-    if let Err(e) = in_packet {
-        return AgentResponse::cl_err_from(e);
-    }
-
+#[rocket::get("/delete-proj?<name>")]
+async fn delete_proj(name: &str, #[allow(unused)] apikey: ApiKey) -> AgentResponse {
     let res = proj_utils::delete_proj(name);
     if let Err(e) = res {
         if e.to_string().contains("does not exist") {
@@ -158,17 +142,8 @@ async fn delete_proj(name: &str, data: Vec<u8>, state: &State<GlobalStateMx>) ->
     AgentResponse::ok_from("success")
 }
 
-#[rocket::post("/get-files?<name>", data="<data>")]
-fn get_proj_files(name: &str, data: Vec<u8>, state: &State<GlobalStateMx>) -> AgentResponse {
-    let lock = state.lock().unwrap();
-    let in_packet = parse_req(&data, &lock.rsa_keys, Some(&lock.api_key));
-    drop(lock);
-
-    let in_packet = match in_packet {
-        Ok(d) => d,
-        Err(e) => return AgentResponse::cl_err_from(e),
-    };
-
+#[rocket::get("/get-files?<name>")]
+fn get_proj_files(name: &str, #[allow(unused)] apikey: ApiKey) -> AgentResponse {
     let fc = match proj_utils::load_proj_files(name, None) {
         Ok(fc) => fc,
         Err(e) => return AgentResponse::ag_err_from(e),
@@ -179,45 +154,13 @@ fn get_proj_files(name: &str, data: Vec<u8>, state: &State<GlobalStateMx>) -> Ag
         compression_utils::compress_brotli(&mut out_packet).unwrap();
     }
 
-    let pub_key = RsaPublicKey::from_pkcs1_der(&in_packet.data).unwrap();
-    rsa_utils::encrypt(&mut out_packet, &pub_key).unwrap();
-
     let payload = bincode::serialize(&out_packet).unwrap();
     
     AgentResponse::OkData(payload)
 }
 
-#[rocket::get("/get-pub-key")]
-async fn emit_pubkey(state: &State<GlobalStateMx>) -> AgentResponse {
-    let lock = match state.lock() {
-        Ok(l) => l,
-        Err(e) => return AgentResponse::ag_err_from(format!("Error getting lock on key: {}", e)),
-    };
-
-    let pubkey = lock.rsa_keys.pub_key.to_pkcs1_der();
-    let pubkey = match pubkey {
-        Ok(p) => p.to_vec(),
-        Err(e) => return AgentResponse::ag_err_from(format!("Error serializing key: {}", e)),
-    };
-
-    AgentResponse::OkData(pubkey)
-}
-
-#[rocket::get("/")]
-async fn root() -> &'static str {
-    "alive"
-}
-
-#[rocket::post("/start-docker-daemon", data="<data>")]
-fn start_docker_daemon(data: Vec<u8>, state: &State<GlobalStateMx>) -> AgentResponse {
-    let lock = state.lock().unwrap();
-    let in_packet = parse_req(&data, &lock.rsa_keys, Some(&lock.api_key));
-    drop(lock);
-    let in_packet = match in_packet {
-        Ok(d) => d,
-        Err(e) => return AgentResponse::cl_err_from(e),
-    };
-
+#[rocket::post("/start-docker-daemon")]
+fn start_docker_daemon(#[allow(unused)] apikey: ApiKey) -> AgentResponse {
     if let Err(e) = docker_utils::start_daemon() {
         return AgentResponse::ag_err_from(e);
     }
@@ -225,16 +168,8 @@ fn start_docker_daemon(data: Vec<u8>, state: &State<GlobalStateMx>) -> AgentResp
     AgentResponse::Ok("success".to_string())
 }
 
-#[rocket::post("/end-docker-daemon", data="<data>")]
-fn end_docker_daemon(data: Vec<u8>, state: &State<GlobalStateMx>) -> AgentResponse {
-    let lock = state.lock().unwrap();
-    let in_packet = parse_req(&data, &lock.rsa_keys, Some(&lock.api_key));
-    drop(lock);
-    let in_packet = match in_packet {
-        Ok(d) => d,
-        Err(e) => return AgentResponse::cl_err_from(e),
-    };
-
+#[rocket::get("/end-docker-daemon")]
+fn end_docker_daemon(#[allow(unused)] apikey: ApiKey) -> AgentResponse {
     if let Err(e) = docker_utils::end_daemon() {
         return AgentResponse::ag_err_from(e);
     }
@@ -242,16 +177,8 @@ fn end_docker_daemon(data: Vec<u8>, state: &State<GlobalStateMx>) -> AgentRespon
     AgentResponse::Ok("success".to_string())
 }
 
-#[rocket::post("/get-daemon-status", data="<data>")]
-fn get_daemon_status(data: Vec<u8>, state: &State<GlobalStateMx>) -> AgentResponse {
-    let lock = state.lock().unwrap();
-    let in_packet = parse_req(&data, &lock.rsa_keys, Some(&lock.api_key));
-    drop(lock);
-    let in_packet = match in_packet {
-        Ok(d) => d,
-        Err(e) => return AgentResponse::cl_err_from(e),
-    };
-
+#[rocket::get("/get-daemon-status")]
+fn get_daemon_status(#[allow(unused)] apikey: ApiKey) -> AgentResponse {
     let status = match docker_utils::get_engine_status() {
         Ok(b) => b,
         Err(e) => return AgentResponse::ag_err_from(e),
@@ -260,16 +187,8 @@ fn get_daemon_status(data: Vec<u8>, state: &State<GlobalStateMx>) -> AgentRespon
     AgentResponse::OkData(vec![status as u8])
 }
 
-#[rocket::post("/build-img?<name>", data="<data>")]
-fn build_image(name: &str, data: Vec<u8>, state: &State<GlobalStateMx>) -> AgentResponse {
-    let lock = state.lock().unwrap();
-    let in_packet = parse_req(&data, &lock.rsa_keys, Some(&lock.api_key));
-    drop(lock);
-    let in_packet = match in_packet {
-        Ok(d) => d,
-        Err(e) => return AgentResponse::cl_err_from(e),
-    };
-
+#[rocket::get("/build-img?<name>")]
+fn build_image(name: &str, #[allow(unused)] apikey: ApiKey) -> AgentResponse {
     let path = format!("{}/{}", proj_utils::LINUX_TYNKERBASE_PATH, name);
     let img_name = format!("{}_image", name);
 
@@ -279,16 +198,8 @@ fn build_image(name: &str, data: Vec<u8>, state: &State<GlobalStateMx>) -> Agent
     AgentResponse::Ok("success".to_string())
 }
 
-#[rocket::post("/spawn-container?<name>", data="<data>")]
-fn spawn_container(name: &str, data: Vec<u8>, state: &State<GlobalStateMx>) -> AgentResponse {
-    let lock = state.lock().unwrap();
-    let in_packet = parse_req(&data, &lock.rsa_keys, Some(&lock.api_key));
-    drop(lock);
-    let in_packet = match in_packet {
-        Ok(d) => d,
-        Err(e) => return AgentResponse::cl_err_from(e),
-    };
-    
+#[rocket::get("/spawn-container?<name>")]
+fn spawn_container(name: &str, #[allow(unused)] apikey: ApiKey) -> AgentResponse {
     let img_name = format!("{}_image", name);
     let container_name = format!("{}_container", name);
     docker_utils::start_container(&img_name, &container_name, vec![], vec![])
@@ -298,37 +209,13 @@ fn spawn_container(name: &str, data: Vec<u8>, state: &State<GlobalStateMx>) -> A
     AgentResponse::Ok("success".to_string())
 }
 
-fn parse_req(v: &Vec<u8>, rsa_keys: &RsaKeys, target_key: Option<&str>) -> Result<BinaryPacket> {
-    let mut packet: BinaryPacket = bincode::deserialize(v)
-        .unwrap();
-
-    if packet.is_encrypted {
-        rsa_utils::decrypt(&mut packet, &rsa_keys.priv_key)
-            .unwrap();
-    }
-    if let Some(target_key) = target_key {
-        let auth_err = anyhow!("AUTHORIZATION ERROR");
-        match packet.get_apikey() {
-            Ok(k) => {
-                if k.trim() != target_key.trim() {
-                    return Err(auth_err);
-                }
-            }
-            Err(e) => return Err(e),
-        }
-    }
-
-    match packet.compression_type {
-        CompressionType::Brotli => compression_utils::decompress_brotli(&mut packet).unwrap(),
-        _ => {},
-    }
-
-    Ok(packet)
+#[rocket::get("/")]
+async fn root() -> &'static str {
+    "alive"
 }
 
 #[derive(Debug)]
 struct GlobalState {
-    rsa_keys: RsaKeys,
     api_key: String,
 }
 
@@ -344,11 +231,9 @@ fn rocket() -> _ {
             .unwrap();
     }
 
-    // generate new rsa keys
-    let rsa_keys = RsaKeys::new();
 
     // handle api keys
-    let path = Path::new("./api-key.bin");
+    let path = Path::new("./keys/api-key.txt");
     let mut api_key = String::new();
     if !path.exists() {
         print!("Enter your API key: ");    // Prompt
@@ -360,16 +245,15 @@ fn rocket() -> _ {
             panic!("Incorrect format");
         }
 
-        fs::write("./api-key.bin", &api_key)
+        fs::write("./keys/api-key.txt", &api_key)
             .unwrap();
     }
     else {
-        api_key = fs::read_to_string("api-key.bin")
+        api_key = fs::read_to_string("./keys/api-key.txt")
             .unwrap();
     }
 
     let state = Arc::new(Mutex::new(GlobalState { 
-        rsa_keys: rsa_keys,
         api_key: api_key,
     }));
 
@@ -385,8 +269,8 @@ fn rocket() -> _ {
             get_daemon_status
         ])
         .mount("/docker/imgs", routes![
-            spawn_container
+            build_image,
+            spawn_container,
         ])
-        .mount("/security", routes![emit_pubkey])
         .manage(state)
 }
