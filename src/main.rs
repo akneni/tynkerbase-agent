@@ -311,7 +311,7 @@ fn parse_req(v: &Vec<u8>, rsa_keys: &RsaKeys, target_key: Option<&str>) -> Resul
         match packet.get_apikey() {
             Ok(k) => {
                 if k != target_key {
-                    return Err(auth_err)
+                    return Err(anyhow!("{}\nk={}\nt={}", auth_err, k, target_key));
                 }
             }
             Err(e) => return Err(e),
