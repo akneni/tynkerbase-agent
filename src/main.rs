@@ -208,34 +208,6 @@ async fn root() -> &'static str {
     "alive"
 }
 
-fn parse_req(v: &Vec<u8>, rsa_keys: &RsaKeys, target_key: Option<&str>) -> Result<BinaryPacket> {
-    let mut packet: BinaryPacket = bincode::deserialize(v)
-        .unwrap();
-
-    if packet.is_encrypted {
-        rsa_utils::decrypt(&mut packet, &rsa_keys.priv_key)
-            .unwrap();
-    }
-    if let Some(target_key) = target_key {
-        let auth_err = anyhow!("AUTHORIZATION ERROR");
-        match packet.get_apikey() {
-            Ok(k) => {
-                if k != target_key {
-                    return Err(auth_err)
-                }
-            }
-            Err(_) => return Err(auth_err),
-        }
-    }
-
-    match packet.compression_type {
-        CompressionType::Brotli => compression_utils::decompress_brotli(&mut packet).unwrap(),
-        _ => {},
-    }
-
-    Ok(packet)
-}
-
 #[rocket::post("/start-docker-daemon", data="<data>")]
 fn start_docker_daemon(data: Vec<u8>, state: &State<GlobalStateMx>) -> AgentResponse {
     let lock = state.lock().unwrap();
@@ -324,6 +296,34 @@ fn spawn_container(name: &str, data: Vec<u8>, state: &State<GlobalStateMx>) -> A
 
 
     AgentResponse::Ok("success".to_string())
+}
+
+fn parse_req(v: &Vec<u8>, rsa_keys: &RsaKeys, target_key: Option<&str>) -> Result<BinaryPacket> {
+    let mut packet: BinaryPacket = bincode::deserialize(v)
+        .unwrap();
+
+    if packet.is_encrypted {
+        rsa_utils::decrypt(&mut packet, &rsa_keys.priv_key)
+            .unwrap();
+    }
+    if let Some(target_key) = target_key {
+        let auth_err = anyhow!("AUTHORIZATION ERROR");
+        match packet.get_apikey() {
+            Ok(k) => {
+                if k != target_key {
+                    return Err(auth_err)
+                }
+            }
+            Err(e) => return Err(e),
+        }
+    }
+
+    match packet.compression_type {
+        CompressionType::Brotli => compression_utils::decompress_brotli(&mut packet).unwrap(),
+        _ => {},
+    }
+
+    Ok(packet)
 }
 
 #[derive(Debug)]
