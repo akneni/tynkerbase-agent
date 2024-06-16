@@ -310,7 +310,7 @@ fn parse_req(v: &Vec<u8>, rsa_keys: &RsaKeys, target_key: Option<&str>) -> Resul
         let auth_err = anyhow!("AUTHORIZATION ERROR");
         match packet.get_apikey() {
             Ok(k) => {
-                if k != target_key {
+                if k.trim() != target_key.trim() {
                     return Err(anyhow!("{}\nk={}\nt={}", auth_err, k, target_key));
                 }
             }
