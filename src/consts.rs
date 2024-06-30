@@ -1,0 +1,1 @@
+pub const AGENT_ROOTDIR_PATH: &str = "/tynkerbase-agent";

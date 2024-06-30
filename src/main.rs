@@ -1,7 +1,10 @@
+mod consts;
+mod dep_utils;
+mod tls_utils;
+
 use tynkerbase_universal::{
     crypt_utils::{
-        compression_utils, 
-        BinaryPacket, 
+        self, compression_utils, hash_utils, BinaryPacket 
     }, 
     docker_utils, 
     proj_utils::{self, FileCollection}
@@ -9,78 +12,47 @@ use tynkerbase_universal::{
 use bincode;
 use rocket::{
     self,
-    http::Status,
     launch,
-    response::{self, Responder, Response},
     routes,
     Request, 
     request::{self, FromRequest},
     outcome::Outcome,
-    State,
+    response::{
+        status::Custom,
+        stream::TextStream,
+    },
+    http::Status,
 };
-use serde::{Deserialize, Serialize};
-use std::fmt::Debug;
 use std::{
-    sync::{Arc, Mutex},
-    fs,
-    path::Path,
-    io::{self, Write},
+    fs, 
+    io::{BufReader, BufRead}, 
+    path::Path, process::{Command, Stdio},
 };
-use anyhow::{anyhow, Result};
+use once_cell::sync::Lazy;
 
-#[derive(Debug, Serialize, Deserialize)]
-enum AgentResponse {
-    Ok(String),
-    OkData(Vec<u8>),
-    AgentErr(String),
-    ClientErr(String),
-}
+static API_KEY: Lazy<String> = Lazy::new(|| {
+    const ENDPOINT: &str = "https://tynkerbase-server.shuttleapp.rs";
+    let rt = tokio::runtime::Runtime::new()
+        .expect("Unable to generate new tokio runtime.");
 
-impl AgentResponse {
-    fn ok_from(x: impl Debug) -> Self {
-        Self::Ok(format!("{:?}", x))
-    }
+    let email = crypt_utils::prompt("Enter your email: ");
+    let password = crypt_utils::prompt_secret("Enter your password: ");
 
-    fn ag_err_from(x: impl Debug) -> Self {
-        Self::AgentErr(format!("{:?}", x))
-    }
+    let pass_sha256 = hash_utils::sha256(&password);
+    let pass_sha384 = hash_utils::sha384(&password);
 
-    fn cl_err_from(x: impl Debug) -> Self {
-        Self::ClientErr(format!("{:?}", x))
-    }
+    let endpoint = format!("{}/auth/login?email={}&pass_sha256={}", ENDPOINT, &email, &pass_sha256);
 
-    fn to_bytes(&self) -> Vec<u8> {
-        bincode::serialize(&self).unwrap()
-    }
+    let f = reqwest::get(&endpoint);
+    let res = rt.block_on(f)
+        .expect("Error sending response");
 
-    fn from_bytes(v: &Vec<u8>) -> Self {
-        bincode::deserialize(v).unwrap()
-    }
-}
+    let salt = rt.block_on(res.text())
+        .expect("unable to extract text from response");
 
-// Implement the `rocket::response::Responder` trait for this enum so it can be returned as an object
-impl<'r> Responder<'r, 'static> for AgentResponse {
-    fn respond_to(self, _: &'r Request<'_>) -> response::Result<'static> {
-        match self {
-            AgentResponse::Ok(msg) => Response::build()
-                .status(Status::Ok)
-                .sized_body(msg.len(), std::io::Cursor::new(msg))
-                .ok(),
-            AgentResponse::OkData(data) => Response::build()
-                .status(Status::Ok)
-                .sized_body(data.len(), std::io::Cursor::new(data))
-                .ok(),
-            AgentResponse::AgentErr(msg) => Response::build()
-                .status(Status::InternalServerError)
-                .sized_body(msg.len(), std::io::Cursor::new(msg))
-                .ok(),
-            AgentResponse::ClientErr(msg) => Response::build()
-                .status(Status::BadRequest)
-                .sized_body(msg.len(), std::io::Cursor::new(msg))
-                .ok(),
-        }
-    }
-}
+    crypt_utils::gen_apikey(&pass_sha384, &salt)
+});
+
 struct ApiKey(String);
 
 #[rocket::async_trait]
@@ -88,27 +60,25 @@ impl<'a> FromRequest<'a> for ApiKey {
     type Error = ();
 
     async fn from_request(req: &'a Request<'_>) -> request::Outcome<Self, Self::Error> {
-        let target = fs::read_to_string("./keys/api-key.txt")
-            .unwrap();
-
         match req.headers().get_one("tyb-api-key") {
-            Some(key) if key == &target => Outcome::Success(ApiKey(key.to_string())),
+            Some(key) if key == (&*API_KEY) => Outcome::Success(ApiKey(key.to_string())),
             _ => Outcome::Error((Status::Forbidden, ())),
         }
     }
 }
 
 #[rocket::post("/create-proj?<name>")]
-async fn create_proj(name: &str, #[allow(unused)] apikey: ApiKey) -> Vec<u8> {
+async fn create_proj(name: &str, #[allow(unused)] apikey: ApiKey) -> Custom<String> {
     let res = proj_utils::create_proj(name);
     if let Err(e) = res {
-        if e.to_string().contains("already exists") {
-            return AgentResponse::cl_err_from(e).to_bytes();
+        let e = e.to_string();
+        if e.contains("already exists") {
+            return Custom(Status::Conflict, format!("User Already Exists -> {e}"));
         }
-        return AgentResponse::ag_err_from(e).to_bytes();
+        return Custom(Status::InternalServerError, e);
     }
 
-    AgentResponse::ok_from("success").to_bytes()
+    Custom(Status::Ok, "success".to_string())
 }
 
 #[rocket::post("/add-files-to-proj?<name>", data = "<data>")]
@@ -116,37 +86,43 @@ async fn add_files_to_proj(
     name: &str,
     data: Vec<u8>,
     #[allow(unused)] apikey: ApiKey,
-) -> AgentResponse {   
+) -> Custom<String> {   
     let _ = proj_utils::clear_proj(&name);
     
     let packet: BinaryPacket = bincode::deserialize(&data).unwrap();
     let files: FileCollection = bincode::deserialize(&packet.data).unwrap();
 
     if let Err(e) = proj_utils::add_files_to_proj(name, files) {
-        return AgentResponse::ag_err_from(e);
+        return Custom(Status::InternalServerError, format!("Error adding files to project -> {e}"));
     }
 
-    AgentResponse::ok_from("success")
+    Custom(Status::Ok, "success".to_string())
 }
 
 #[rocket::get("/delete-proj?<name>")]
-async fn delete_proj(name: &str, #[allow(unused)] apikey: ApiKey) -> AgentResponse {
+async fn delete_proj(name: &str, #[allow(unused)] apikey: ApiKey) -> Custom<String> {
     let res = proj_utils::delete_proj(name);
     if let Err(e) = res {
-        if e.to_string().contains("does not exist") {
-            return AgentResponse::cl_err_from(e);
+        let e = e.to_string();
+        if e.contains("does not exist") {
+            return Custom(Status::Conflict, format!("Project does not exist -> {e}"));
         }
-        return AgentResponse::ag_err_from(e);
+        return Custom(Status::InternalServerError, e);
     }
 
-    AgentResponse::ok_from("success")
+    Custom(Status::Ok, "success".to_string())
 }
 
 #[rocket::get("/get-files?<name>")]
-fn get_proj_files(name: &str, #[allow(unused)] apikey: ApiKey) -> AgentResponse {
+fn get_proj_files(name: &str, #[allow(unused)] apikey: ApiKey) -> Custom<Vec<u8>> {
     let fc = match proj_utils::load_proj_files(name, None) {
         Ok(fc) => fc,
-        Err(e) => return AgentResponse::ag_err_from(e),
+        Err(e) => {
+            return Custom(
+                Status::InternalServerError, 
+                format!("Error starting docker daemon -> {e}").as_bytes().to_vec()
+            );
+        },
     };
 
     let mut out_packet = BinaryPacket::from(&fc).unwrap();
@@ -156,57 +132,125 @@ fn get_proj_files(name: &str, #[allow(unused)] apikey: ApiKey) -> AgentResponse 
 
     let payload = bincode::serialize(&out_packet).unwrap();
     
-    AgentResponse::OkData(payload)
+    Custom(Status::Ok, payload)
 }
 
 #[rocket::post("/start-docker-daemon")]
-fn start_docker_daemon(#[allow(unused)] apikey: ApiKey) -> AgentResponse {
+fn start_docker_daemon(#[allow(unused)] apikey: ApiKey) -> Custom<String> {
     if let Err(e) = docker_utils::start_daemon() {
-        return AgentResponse::ag_err_from(e);
+        return Custom(Status::InternalServerError, format!("Error starting docker daemon -> {e}"));
     }
     
-    AgentResponse::Ok("success".to_string())
+    Custom(Status::Ok, "success".to_string())
 }
 
 #[rocket::get("/end-docker-daemon")]
-fn end_docker_daemon(#[allow(unused)] apikey: ApiKey) -> AgentResponse {
+fn end_docker_daemon(#[allow(unused)] apikey: ApiKey) -> Custom<String> {
     if let Err(e) = docker_utils::end_daemon() {
-        return AgentResponse::ag_err_from(e);
+        return Custom(Status::InternalServerError, format!("Failed to end daemon: {e}"));
     }
     
-    AgentResponse::Ok("success".to_string())
+    Custom(Status::Ok, "success".to_string())
 }
 
 #[rocket::get("/get-daemon-status")]
-fn get_daemon_status(#[allow(unused)] apikey: ApiKey) -> AgentResponse {
+fn get_daemon_status(#[allow(unused)] apikey: ApiKey) -> Custom<String> {
     let status = match docker_utils::get_engine_status() {
         Ok(b) => b,
-        Err(e) => return AgentResponse::ag_err_from(e),
+        Err(e) => return Custom(Status::Ok, format!("Error getting daemon status: {}", e)),
     };
 
-    AgentResponse::OkData(vec![status as u8])
+    Custom(Status::Ok, status.to_string())
 }
 
 #[rocket::get("/build-img?<name>")]
-fn build_image(name: &str, #[allow(unused)] apikey: ApiKey) -> AgentResponse {
+fn build_image(name: &str, #[allow(unused)] apikey: ApiKey) -> Custom<String> {
     let path = format!("{}/{}", proj_utils::LINUX_TYNKERBASE_PATH, name);
     let img_name = format!("{}_image", name);
 
     docker_utils::build_image(&path, &img_name)
         .unwrap();
 
-    AgentResponse::Ok("success".to_string())
+    Custom(Status::Ok, "success".to_string())
 }
 
 #[rocket::get("/spawn-container?<name>")]
-fn spawn_container(name: &str, #[allow(unused)] apikey: ApiKey) -> AgentResponse {
+fn spawn_container(name: &str, #[allow(unused)] apikey: ApiKey) -> Custom<String> {
     let img_name = format!("{}_image", name);
     let container_name = format!("{}_container", name);
-    docker_utils::start_container(&img_name, &container_name, vec![], vec![])
-        .unwrap();
+    if let Err(e) = docker_utils::start_container(&img_name, &container_name, vec![], vec![]) {
+        return Custom(Status::InternalServerError, format!("Failed to start container -> {e}"));
+    }
 
+    Custom(Status::Ok, "success".to_string())
+}
 
-    AgentResponse::Ok("success".to_string())
+#[rocket::get("/halt-container?<name>")]
+async fn halt_container(name: &str, #[allow(unused)] apikey: ApiKey) -> Custom<String> {
+    let img_name = format!("{}_image", name);
+    let container_name = format!("{}_container", name);
+
+    if let Err(e) = docker_utils::start_container(&img_name, &container_name, vec![], vec![]) {
+        return Custom(Status::InternalServerError, format!("Failed to start container -> {e}"));
+    }
+
+    Custom(Status::Ok, "success".to_string())
+}
+
+#[rocket::get("/install-docker")]
+async fn install_docker() -> TextStream![String] {
+    TextStream! {
+        yield "Installing Docker...\n\n".to_string();
+
+        let cmd = dep_utils::docker::get_install_command().unwrap();
+
+        let mut child = Command::new(cmd[0])
+            .args(&cmd[1..])
+            .stdout(Stdio::piped())
+            .spawn()
+            .expect("Failed to start command");
+
+        let stdout = child.stdout.take();
+        if let Some(stdout) = stdout {
+            let mut reader = BufReader::new(stdout).lines();
+    
+            while let Some(Ok(l)) = reader.next() {
+                yield l;
+            }
+            yield "\nFinished docker installation".to_string();        
+        }
+        else {
+            yield "Failed to extract stdout from docker install process".to_string();
+        }
+    }
+}
+
+#[rocket::get("/install-docker")]
+async fn install_openssl() -> TextStream![String] {
+    TextStream! {
+        yield "Installing OpenSSL...\n\n".to_string();
+
+        let cmd = dep_utils::openssl::get_install_command().unwrap();
+
+        let mut child = Command::new(cmd[0])
+            .args(&cmd[1..])
+            .stdout(Stdio::piped())
+            .spawn()
+            .expect("Failed to start command");
+
+        let stdout = child.stdout.take();
+        if let Some(stdout) = stdout {
+            let mut reader = BufReader::new(stdout).lines();
+    
+            while let Some(Ok(l)) = reader.next() {
+                yield l;
+            }
+            yield "\nFinished OpenSSL installation".to_string();        
+        }
+        else {
+            yield "Failed to extract stdout from OpenSSL install process".to_string();
+        }
+    }
 }
 
 #[rocket::get("/")]
@@ -214,12 +258,6 @@ async fn root() -> &'static str {
     "alive"
 }
 
-#[derive(Debug)]
-struct GlobalState {
-    api_key: String,
-}
-
-type GlobalStateMx = Arc<Mutex<GlobalState>>;
 
 #[launch]
 fn rocket() -> _ {
@@ -231,36 +269,21 @@ fn rocket() -> _ {
             .unwrap();
     }
 
+    // Load API key
+    Lazy::force(&API_KEY);
 
-    // handle api keys
-    let path = Path::new("./keys/api-key.txt");
-    let mut api_key = String::new();
-    if !path.exists() {
-        print!("Enter your API key: ");    // Prompt
-        io::stdout().flush().unwrap();  // Flushes output buffer
-
-        io::stdin().read_line(&mut api_key).expect("Failed to read line.");
-
-        if !api_key.starts_with("tyb_key_") || api_key.len() < 64 {
-            panic!("Incorrect format");
+    // Ensure TLS keys and certificates are ready
+    if !tls_utils::check_tls_cert() {
+        if let Err(e) = tls_utils::gen_tls_cert() {
+            println!("Error:\n{}", e);
+            std::process::exit(1);
         }
-
-        fs::write("./keys/api-key.txt", &api_key)
-            .unwrap();
     }
-    else {
-        api_key = fs::read_to_string("./keys/api-key.txt")
-            .unwrap();
-    }
-
-    let state = Arc::new(Mutex::new(GlobalState { 
-        api_key: api_key,
-    }));
 
     rocket::build()
         .mount("/", routes![root])
         .mount(
-            "/proj",
+            "/files/proj",
             routes![create_proj, add_files_to_proj, delete_proj, get_proj_files],
         )
         .mount("/docker/daemon", routes![
@@ -268,9 +291,13 @@ fn rocket() -> _ {
             end_docker_daemon, 
             get_daemon_status
         ])
-        .mount("/docker/imgs", routes![
+        .mount("/docker/proj", routes![
             build_image,
             spawn_container,
+            halt_container,
         ])
-        .manage(state)
+        .mount("/dependencies", routes![
+            install_docker,
+            install_openssl,
+        ])
 }

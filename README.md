@@ -15,7 +15,7 @@ The Agent App is a core component of the TynkerBase project. It runs on various 
 - TBD
 
 ### Prerequisites
-- **Operating System**: Linux, macOS, or Windows
+- **Operating System**: Linux, Windows though WSL
 - **Dependencies**: TBD
 
 ### Installation
