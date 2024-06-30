@@ -22,6 +22,8 @@ use rocket::{
         stream::TextStream,
     },
     http::Status,
+    config::Config,
+    figment::{Figment, providers::{Format, Toml, Env}},
 };
 
 use std::{
@@ -336,7 +338,14 @@ fn rocket() -> _ {
         process::exit(0);
     }
 
-    rocket::build()
+    // Specify the path to Rocket.toml
+    let r_toml_path = format!("{}/Rocket.toml", consts::AGENT_ROOTDIR_PATH);
+    let r_toml_path = Path::new(&r_toml_path);
+    let figment = Figment::from(Config::default())
+        .merge(Toml::file(r_toml_path))
+        .merge(Env::prefixed("ROCKET_"));
+
+    rocket::custom(figment)
         .mount("/", routes![root])
         .mount(
             "/files/proj",
