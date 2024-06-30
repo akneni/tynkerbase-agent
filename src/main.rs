@@ -22,7 +22,7 @@ use rocket::{
         stream::TextStream,
     },
     http::Status,
-    config::Config,
+    config::{Config, TlsConfig},
     figment::{Figment, providers::{Format, Toml, Env}},
 };
 
@@ -338,12 +338,15 @@ fn rocket() -> _ {
         process::exit(0);
     }
 
-    // Specify the path to Rocket.toml
-    let r_toml_path = format!("{}/Rocket.toml", consts::AGENT_ROOTDIR_PATH);
-    let r_toml_path = Path::new(&r_toml_path);
-    let figment = Figment::from(Config::default())
-        .merge(Toml::file(r_toml_path))
-        .merge(Env::prefixed("ROCKET_"));
+    // Specify configuration
+    let tls_paths = tls_utils::get_cert_paths();
+    let config = Config {
+        address: "0.0.0.0".parse().expect("Invalid address"),
+        port: 7462,
+        tls: Some(TlsConfig::from_paths(&tls_paths[0], &tls_paths[1])),
+        ..Config::default()
+    };
+    let figment = Figment::from(config);
 
     rocket::custom(figment)
         .mount("/", routes![root])

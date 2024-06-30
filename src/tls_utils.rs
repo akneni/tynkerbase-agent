@@ -1,3 +1,4 @@
+use crate::consts::AGENT_ROOTDIR_PATH;
 use std::{
     fs,
     path::Path,
@@ -78,4 +79,11 @@ pub fn clear_tls_cert(proj_root_path: &str) -> Result<()> {
         }
     }
     Ok(())
+}
+
+pub fn get_cert_paths() -> [String; 2] {
+    [
+        format!("{}/keys/tls-cert.pem", AGENT_ROOTDIR_PATH),
+        format!("{}/keys/tls-key.pem", AGENT_ROOTDIR_PATH),
+    ]
 }
