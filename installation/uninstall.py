@@ -1,8 +1,8 @@
 import shutil
 import os
 
-if os.path.exists('/usr/bin/tyb_agent'):
-    os.remove('/usr/bin/tyb_agent')
+if os.path.exists('/usr/local/bin/tyb_agent'):
+    os.remove('/usr/local/bin/tyb_agent')
 
 tyb_path = "/usr/share/tynkerbase-agent"
 if os.path.exists(tyb_path):
