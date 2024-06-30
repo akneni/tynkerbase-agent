@@ -1,1 +1,1 @@
-pub const AGENT_ROOTDIR_PATH: &str = "/tynkerbase-agent";
+pub const AGENT_ROOTDIR_PATH: &str = "/usr/share/tynkerbase-agent";

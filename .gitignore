@@ -1,3 +1,14 @@
-target
+target/release/
+target/release/*
+target/debug/
+target/debug/*
+target/*
+
+/installation
+
 .vscode
 keys/*
+
+# Include precompiled binary
+!target/release/
+!target/release/tynkerbase-agent
