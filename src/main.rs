@@ -23,11 +23,20 @@ use rocket::{
     },
     http::Status,
 };
+
 use std::{
-    fs, 
     io::{BufReader, BufRead}, 
-    path::Path, process::{Command, Stdio},
+    process::{self, Command, Stdio},
 };
+
+// Suppress warning being thrown since OS is only used in release mode
+#[allow(unused_imports)]
+use std::{
+    fs,
+    path::Path,
+    env::consts::OS,
+};
+
 use once_cell::sync::Lazy;
 
 static API_KEY: Lazy<String> = Lazy::new(|| {
@@ -53,7 +62,10 @@ static API_KEY: Lazy<String> = Lazy::new(|| {
     crypt_utils::gen_apikey(&pass_sha384, &salt)
 });
 
-struct ApiKey(String);
+struct ApiKey(
+    #[allow(unused)]
+    String
+);
 
 #[rocket::async_trait]
 impl<'a> FromRequest<'a> for ApiKey {
@@ -225,7 +237,7 @@ async fn install_docker() -> TextStream![String] {
     }
 }
 
-#[rocket::get("/install-docker")]
+#[rocket::get("/install-openssl")]
 async fn install_openssl() -> TextStream![String] {
     TextStream! {
         yield "Installing OpenSSL...\n\n".to_string();
@@ -261,23 +273,67 @@ async fn root() -> &'static str {
 
 #[launch]
 fn rocket() -> _ {
+    // Ensure we're running on linux
+    #[cfg(not(debug_assertions))] {
+        if OS != "linux" {
+            println!("Unfortunately, we only support linux at the current time.");
+            process::exit(0);
+        }
+    }
     // Create TynkerBase Directory
-    let path_str = format!("/{}", proj_utils::LINUX_TYNKERBASE_PATH);
-    let path =  Path::new(&path_str);
-    if !path.exists() {
-        fs::create_dir(path_str)
-            .unwrap();
+    #[cfg(not(debug_assertions))] {
+        let path_str = format!("/{}", proj_utils::LINUX_TYNKERBASE_PATH);
+        let path =  Path::new(&path_str);
+        if !path.exists() {
+            if let Err(e) = fs::create_dir(path_str) {
+                if e.to_string().contains("Permission denied") {
+                    println!("TynkerBase Agent needs root privileges. Please re-run with `sudo`");
+                    std::process::exit(0);
+                }
+            }
+        }
     }
 
     // Load API key
     Lazy::force(&API_KEY);
 
     // Ensure TLS keys and certificates are ready
-    if !tls_utils::check_tls_cert() {
-        if let Err(e) = tls_utils::gen_tls_cert() {
+    let root_dir = consts::AGENT_ROOTDIR_PATH;
+    if !tls_utils::check_tls_cert(root_dir) {
+        if !dep_utils::openssl::check_openssl() {
+            println!("In order to enable TLS encryption, you need to install open ssl. (If it's already installed, try restarting the terminal)");
+            let res = crypt_utils::prompt("Would you like to do that now? (y/n): ");
+            if res.to_ascii_lowercase() == "y" {
+                if let Err(e) = dep_utils::openssl::install_openssl() {
+                    println!("Failed to install OpenSSL, install manually.\nError -> {}", e);
+                    process::exit(1);
+                }
+                else {
+                    println!("Successfully installed OpenSSL!");
+                }
+            }
+            process::exit(0);
+        }
+        if let Err(e) = tls_utils::gen_tls_cert(root_dir) {
             println!("Error:\n{}", e);
             std::process::exit(1);
         }
+    }
+
+    // Ensure docker is installed
+    if !dep_utils::docker::check_docker() {
+        println!("Docker is not installed. (If it's already installed, try restarting the terminal)");
+        let res = crypt_utils::prompt("Install docker now? (y/n): ");
+        if res.to_ascii_lowercase() == "y" {
+            if let Err(e) = dep_utils::docker::install_docker() {
+                println!("Failed to install Docker, install manually.\nError -> {}", e);
+                process::exit(1);
+            }
+            else {
+                println!("Successfully installed Docker!");
+            }
+        }
+        process::exit(0);
     }
 
     rocket::build()

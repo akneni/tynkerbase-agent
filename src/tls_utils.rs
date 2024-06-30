@@ -1,4 +1,3 @@
-use crate::consts::AGENT_ROOTDIR_PATH;
 use std::{
     fs,
     path::Path,
@@ -7,16 +6,16 @@ use std::{
 use anyhow::{anyhow, Result};
 
 
-pub fn check_tls_cert() -> bool {
-    if !Path::new(&format!("{AGENT_ROOTDIR_PATH}/keys")).exists() {
+pub fn check_tls_cert(proj_root_path: &str) -> bool {
+    if !Path::new(&format!("{proj_root_path}/keys")).exists() {
         return false;
     }
-    Path::new(&format!("{AGENT_ROOTDIR_PATH}/keys/tls-cert.pem")).exists() && 
-    Path::new(&format!("{AGENT_ROOTDIR_PATH}/keys/tls-key.pem")).exists()    
+    Path::new(&format!("{proj_root_path}/keys/tls-cert.pem")).exists() && 
+    Path::new(&format!("{proj_root_path}/keys/tls-key.pem")).exists()    
 }
 
-pub fn gen_tls_cert() -> Result<()> {
-    clear_tls_cert()?;
+pub fn gen_tls_cert(proj_root_path: &str) -> Result<()> {
+    clear_tls_cert(proj_root_path)?;
 
     let cmd = vec![
         "openssl".to_string(),
@@ -26,10 +25,10 @@ pub fn gen_tls_cert() -> Result<()> {
         "-genkey".to_string(),
         "-noout".to_string(),
         "-out".to_string(),
-        format!("{}/keys/tls-key.key", AGENT_ROOTDIR_PATH),
+        format!("{}/keys/tls-key.pem", proj_root_path),
     ];
 
-    println!("Generating TLS private key... ");
+    println!("Generating TLS private key...\nPlease answer the following questions to generate the certificate\n");
     let mut child = Command::new(&cmd[0])
         .args(&cmd[1..])
         .spawn()
@@ -45,9 +44,9 @@ pub fn gen_tls_cert() -> Result<()> {
         "-x509".to_string(),
         "-new".to_string(),
         "-key".to_string(),
-        format!("{}/keys/tls-key.pem", AGENT_ROOTDIR_PATH),
+        format!("{}/keys/tls-key.pem", proj_root_path),
         "-out".to_string(),
-        format!("{}/keys/tls-cert.pem", AGENT_ROOTDIR_PATH),
+        format!("{}/keys/tls-cert.pem", proj_root_path),
         "-days".to_string(),
         "36500".to_string(),
     ];
@@ -63,15 +62,15 @@ pub fn gen_tls_cert() -> Result<()> {
     Ok(())
 }
 
-pub fn clear_tls_cert() -> Result<()> {
-    if !Path::new(&format!("{AGENT_ROOTDIR_PATH}/keys")).exists() {
-        fs::create_dir(&format!("{AGENT_ROOTDIR_PATH}/keys"))
+pub fn clear_tls_cert(proj_root_path: &str) -> Result<()> {
+    if !Path::new(&format!("{proj_root_path}/keys")).exists() {
+        fs::create_dir(&format!("{proj_root_path}/keys"))
             .map_err(|e| anyhow!("Failed to create `keys` directory to hold the certificates -> {e}"))?;
     }
     else {
         let files = ["keys/tls-key.pem", "keys/tls-cert.pem", "keys/tls-csr.csr"];
         for file in files {
-            let path = format!("{AGENT_ROOTDIR_PATH}/{file}");
+            let path = format!("{proj_root_path}/{file}");
             if Path::new(&path).exists() {
                 fs::remove_file(&path)
                     .map_err(|e| anyhow!("Failed to remove existing` {path} -> {e}"))?;

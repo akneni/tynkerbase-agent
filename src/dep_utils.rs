@@ -19,7 +19,6 @@ pub fn find_package_manager() -> Result<&'static str> {
 
 pub mod docker {
     use std::process::Command;
-    use std::env::consts::OS;
     use anyhow::{anyhow, Result};
     use super::find_package_manager;
 
