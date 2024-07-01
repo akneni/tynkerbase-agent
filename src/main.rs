@@ -2,12 +2,13 @@ mod consts;
 mod dep_utils;
 mod tls_utils;
 
+use consts::AGENT_ROOTDIR_PATH;
 use tynkerbase_universal::{
     crypt_utils::{
         self, compression_utils, hash_utils, BinaryPacket 
     }, 
     docker_utils, 
-    proj_utils::{self, FileCollection}
+    proj_utils::{self, FileCollection},
 };
 use bincode;
 use rocket::{
@@ -23,8 +24,10 @@ use rocket::{
     },
     http::Status,
     config::{Config, TlsConfig},
-    figment::{Figment, providers::{Format, Toml, Env}},
+    figment::Figment,
 };
+use rand::{thread_rng, Rng};
+use once_cell::sync::Lazy;
 
 use std::{
     io::{BufReader, BufRead}, 
@@ -39,7 +42,6 @@ use std::{
     env::consts::OS,
 };
 
-use once_cell::sync::Lazy;
 
 static API_KEY: Lazy<String> = Lazy::new(|| {
     const ENDPOINT: &str = "https://tynkerbase-server.shuttleapp.rs";
@@ -62,6 +64,29 @@ static API_KEY: Lazy<String> = Lazy::new(|| {
         .expect("unable to extract text from response");
 
     crypt_utils::gen_apikey(&pass_sha384, &salt)
+});
+
+static NODE_ID: Lazy<String> = Lazy::new(|| {
+    // Generate/read Server ID
+    let id_len = 32;
+    let mut path_str = format!("{}/data", AGENT_ROOTDIR_PATH);
+    let path = Path::new(&path_str);
+    if !path.exists() {
+        fs::create_dir(&path)
+            .unwrap();
+    }
+    path_str.push_str("/ID.txt");
+    let path = Path::new(&path_str);
+    if !path.exists() {
+        let mut rng = thread_rng();
+        let id = (0..id_len)
+            .map(|_| rng.gen_range(97..97+26) as u8)
+            .collect();
+        let id = String::from_utf8(id).unwrap();
+        fs::write(&path_str, &id).unwrap();
+        return id;
+    }
+    fs::read_to_string(&path_str).unwrap()
 });
 
 struct ApiKey(
@@ -127,8 +152,23 @@ async fn delete_proj(name: &str, #[allow(unused)] apikey: ApiKey) -> Custom<Stri
     Custom(Status::Ok, "success".to_string())
 }
 
-#[rocket::get("/get-files?<name>")]
-fn get_proj_files(name: &str, #[allow(unused)] apikey: ApiKey) -> Custom<Vec<u8>> {
+#[rocket::get("/list_projects")]
+async fn list_projects(#[allow(unused)] apikey: ApiKey) -> Custom<Vec<u8>> {
+    let res = proj_utils::get_proj_names();
+    let res = match bincode::serialize(&res) {
+        Ok(r) => r,
+        Err(e) => {
+            let e = e.to_string();
+            let e: Vec<u8> = bincode::serialize(&e).unwrap_or(vec![]);
+            return Custom(Status::InternalServerError, e);
+        }
+    };
+
+    Custom(Status::Ok, res)
+}
+
+#[rocket::get("/pull-files?<name>")]
+fn pull_proj_files(name: &str, #[allow(unused)] apikey: ApiKey) -> Custom<Vec<u8>> {
     let fc = match proj_utils::load_proj_files(name, None) {
         Ok(fc) => fc,
         Err(e) => {
@@ -212,7 +252,7 @@ async fn halt_container(name: &str, #[allow(unused)] apikey: ApiKey) -> Custom<S
 }
 
 #[rocket::get("/install-docker")]
-async fn install_docker() -> TextStream![String] {
+async fn install_docker(#[allow(unused)] apikey: ApiKey) -> TextStream![String] {
     TextStream! {
         yield "Installing Docker...\n\n".to_string();
 
@@ -240,7 +280,7 @@ async fn install_docker() -> TextStream![String] {
 }
 
 #[rocket::get("/install-openssl")]
-async fn install_openssl() -> TextStream![String] {
+async fn install_openssl(#[allow(unused)] apikey: ApiKey) -> TextStream![String] {
     TextStream! {
         yield "Installing OpenSSL...\n\n".to_string();
 
@@ -267,6 +307,11 @@ async fn install_openssl() -> TextStream![String] {
     }
 }
 
+#[rocket::get("/get-id")]
+async fn identify(#[allow(unused)] apikey: ApiKey) -> String {
+    (&*NODE_ID).clone()
+}
+
 #[rocket::get("/")]
 async fn root() -> &'static str {
     "alive"
@@ -284,7 +329,7 @@ fn rocket() -> _ {
     }
     // Create TynkerBase Directory
     #[cfg(not(debug_assertions))] {
-        let path_str = format!("/{}", proj_utils::LINUX_TYNKERBASE_PATH);
+        let path_str = format!("/{}", tynkerbase_universal::constants::LINUX_TYNKERBASE_PATH);
         let path =  Path::new(&path_str);
         if !path.exists() {
             if let Err(e) = fs::create_dir(path_str) {
@@ -298,6 +343,9 @@ fn rocket() -> _ {
 
     // Load API key
     Lazy::force(&API_KEY);
+
+    // Load Node ID
+    Lazy::force(&NODE_ID);
 
     // Ensure TLS keys and certificates are ready
     let root_dir = consts::AGENT_ROOTDIR_PATH;
@@ -349,15 +397,18 @@ fn rocket() -> _ {
     let figment = Figment::from(config);
 
     rocket::custom(figment)
-        .mount("/", routes![root])
-        .mount(
-            "/files/proj",
-            routes![create_proj, add_files_to_proj, delete_proj, get_proj_files],
-        )
+        .mount("/", routes![root, identify])
+        .mount("/files/proj", routes![
+                create_proj, 
+                add_files_to_proj, 
+                delete_proj, 
+                pull_proj_files, 
+                list_projects,
+        ])
         .mount("/docker/daemon", routes![
             start_docker_daemon, 
             end_docker_daemon, 
-            get_daemon_status
+            get_daemon_status,
         ])
         .mount("/docker/proj", routes![
             build_image,
