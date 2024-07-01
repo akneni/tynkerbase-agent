@@ -8,9 +8,9 @@ tyb_path = "/usr/share/tynkerbase-agent"
 if os.path.exists(tyb_path):
     shutil.rmtree(tyb_path)
 
-if not os.path.exists('/tynkerbase-projects'):
+if not os.path.exists('/tyb-root'):
     exit(0)
 
 res = input('Do you also want to uninstall all your tynkerbase projects? (y/n)  ')
 if res.strip().lower() in ('y', 'yes'):
-    shutil.rmtree('/tynkerbase-projects')
+    shutil.rmtree('/tyb-root')
