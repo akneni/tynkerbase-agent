@@ -16,7 +16,11 @@ The Agent App is a core component of the TynkerBase project. It runs on various 
 
 ### Prerequisites
 - **Operating System**: Linux, Windows though WSL
-- **Dependencies**: TBD
+- **Dependencies**: 
+    - Docker
+    - OpenSSL
+    - libssl-dev
+    - pkg-config
 
 ### Installation
 - Install tynkerbase agent. This will only work for linux x86; for linux ARM, you will need to build from source. 
