@@ -9,6 +9,7 @@ use tynkerbase_universal::{
     }, 
     docker_utils, 
     proj_utils::{self, FileCollection},
+    constants as univ_consts,
 };
 use bincode;
 use rocket::{
@@ -219,7 +220,7 @@ fn get_daemon_status(#[allow(unused)] apikey: ApiKey) -> Custom<String> {
 
 #[rocket::get("/build-img?<name>")]
 fn build_image(name: &str, #[allow(unused)] apikey: ApiKey) -> Custom<String> {
-    let path = format!("{}/{}", proj_utils::LINUX_TYNKERBASE_PATH, name);
+    let path = format!("{}/{}", univ_consts::LINUX_TYNKERBASE_PATH, name);
     let img_name = format!("{}_image", name);
 
     docker_utils::build_image(&path, &img_name)
@@ -329,7 +330,7 @@ fn rocket() -> _ {
     }
     // Create TynkerBase Directory
     #[cfg(not(debug_assertions))] {
-        let path_str = format!("/{}", tynkerbase_universal::constants::LINUX_TYNKERBASE_PATH);
+        let path_str = format!("/{}", univ_consts::LINUX_TYNKERBASE_PATH);
         let path =  Path::new(&path_str);
         if !path.exists() {
             if let Err(e) = fs::create_dir(path_str) {

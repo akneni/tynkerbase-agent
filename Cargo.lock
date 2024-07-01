@@ -2093,9 +2093,9 @@ dependencies = [
 
 [[package]]
 name = "serde_json"
-version = "1.0.118"
+version = "1.0.119"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d947f6b3163d8857ea16c4fa0dd4840d52f3041039a85decd46867eb1abef2e4"
+checksum = "e8eddb61f0697cc3989c5d64b452f5488e2b8a60fd7d5076a3045076ffef8cb0"
 dependencies = [
  "itoa",
  "ryu",
@@ -2576,7 +2576,7 @@ dependencies = [
 [[package]]
 name = "tynkerbase_universal"
 version = "0.1.0"
-source = "git+https://github.com/akneni/tynkerbase-universal.git?branch=master#a9b4c89ff54fc07b96cf2ef6901d911593db6d17"
+source = "git+https://github.com/akneni/tynkerbase-universal.git?branch=master#db5b8c341eda11b6837fb251320c6a76fb199cff"
 dependencies = [
  "anyhow",
  "bincode",
