@@ -11,3 +11,4 @@ const fn get_proj_path() -> &'static str {
 }
 
 pub const AGENT_ROOTDIR_PATH: &str = get_proj_path();
+pub const SERVER_ENDPOINT: &str = "https://tynkerbase-server.shuttleapp.rs";

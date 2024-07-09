@@ -1,8 +1,11 @@
 mod consts;
 mod dep_utils;
 mod tls_utils;
+mod ngrok_utils;
+mod global_state;
 
 use consts::AGENT_ROOTDIR_PATH;
+use global_state::{GlobalState, TsGlobalState};
 use tynkerbase_universal::{
     crypt_utils::{
         self, compression_utils, hash_utils, BinaryPacket 
@@ -28,11 +31,12 @@ use rocket::{
     figment::Figment,
 };
 use rand::{thread_rng, Rng};
-use once_cell::sync::Lazy;
 
 use std::{
     io::{BufReader, BufRead}, 
     process::{self, Command, Stdio},
+    env,
+    sync::OnceLock,
 };
 
 // Suppress warning being thrown since OS is only used in release mode
@@ -43,31 +47,21 @@ use std::{
     env::consts::OS,
 };
 
-
-static API_KEY: Lazy<String> = Lazy::new(|| {
+async fn load_apikey(email: &str, pass_sha256: &str, pass_sha384: &str) -> String {
     const ENDPOINT: &str = "https://tynkerbase-server.shuttleapp.rs";
-    let rt = tokio::runtime::Runtime::new()
-        .expect("Unable to generate new tokio runtime.");
-
-    let email = crypt_utils::prompt("Enter your email: ");
-    let password = crypt_utils::prompt_secret("Enter your password: ");
-
-    let pass_sha256 = hash_utils::sha256(&password);
-    let pass_sha384 = hash_utils::sha384(&password);
-
     let endpoint = format!("{}/auth/login?email={}&pass_sha256={}", ENDPOINT, &email, &pass_sha256);
 
-    let f = reqwest::get(&endpoint);
-    let res = rt.block_on(f)
-        .expect("Error sending response");
+    let res = reqwest::get(&endpoint)
+        .await
+        .unwrap();
 
-    let salt = rt.block_on(res.text())
+    let salt = res.text().await
         .expect("unable to extract text from response");
 
-    crypt_utils::gen_apikey(&pass_sha384, &salt)
-});
+    crypt_utils::gen_apikey(pass_sha384, &salt)
+}
 
-static NODE_ID: Lazy<String> = Lazy::new(|| {
+fn load_node_id() -> String {
     // Generate/read Server ID
     let id_len = 32;
     let mut path_str = format!("{}/data", AGENT_ROOTDIR_PATH);
@@ -88,7 +82,7 @@ static NODE_ID: Lazy<String> = Lazy::new(|| {
         return id;
     }
     fs::read_to_string(&path_str).unwrap()
-});
+}
 
 struct ApiKey(
     #[allow(unused)]
@@ -101,7 +95,14 @@ impl<'a> FromRequest<'a> for ApiKey {
 
     async fn from_request(req: &'a Request<'_>) -> request::Outcome<Self, Self::Error> {
         match req.headers().get_one("tyb-api-key") {
-            Some(key) if key == (&*API_KEY) => Outcome::Success(ApiKey(key.to_string())),
+            Some(key) => {
+                let gstate = get_global();
+                let lock = gstate.read().await;
+                if key == (lock.tyb_apikey.as_ref().unwrap()) {
+                    return Outcome::Success(ApiKey(key.to_string()));
+                }
+                Outcome::Error((Status::Forbidden, ()))
+            },
             _ => Outcome::Error((Status::Forbidden, ())),
         }
     }
@@ -310,7 +311,8 @@ async fn install_openssl(#[allow(unused)] apikey: ApiKey) -> TextStream![String]
 
 #[rocket::get("/get-id")]
 async fn identify(#[allow(unused)] apikey: ApiKey) -> String {
-    (&*NODE_ID).clone()
+    let gstate = get_global();
+    gstate.read().await.node_id.clone().unwrap()
 }
 
 #[rocket::get("/")]
@@ -319,8 +321,19 @@ async fn root() -> &'static str {
 }
 
 
+fn get_global() -> &'static TsGlobalState {
+    GSTATE.get_or_init(|| {
+        GlobalState::new()
+    })
+}
+
+static GSTATE: OnceLock<TsGlobalState> = OnceLock::new();
+
+
+
+
 #[launch]
-fn rocket() -> _ {
+async fn rocket() -> _ {
     // Ensure we're running on linux
     #[cfg(not(debug_assertions))] {
         if OS != "linux" {
@@ -342,11 +355,23 @@ fn rocket() -> _ {
         }
     }
 
-    // Load API key
-    Lazy::force(&API_KEY);
+    // load global state
+    let gstate = get_global();
 
-    // Load Node ID
-    Lazy::force(&NODE_ID);
+    // Get login info
+    let email = crypt_utils::prompt("Enter your email: ");
+    let password = crypt_utils::prompt_secret("Enter your password: ");
+    let pass_sha256 = hash_utils::sha256(&password);
+    let pass_sha384 = hash_utils::sha384(&password);
+
+    let mut lock = gstate.write().await;
+    lock.tyb_apikey = Some(load_apikey(&email, &pass_sha256, &pass_sha384).await);
+    lock.email = Some(email);
+    lock.pass_sha256 = Some(pass_sha256);
+    lock.pass_sha384 = Some(pass_sha384);
+    lock.node_id = Some(load_node_id());
+    drop(lock);
+    drop(password);
 
     // Ensure TLS keys and certificates are ready
     let root_dir = consts::AGENT_ROOTDIR_PATH;
@@ -387,6 +412,65 @@ fn rocket() -> _ {
         process::exit(0);
     }
 
+    // Ensure ngrok auth token is ready
+    let envs = env::args().collect::<Vec<String>>();
+    if !(envs.len() >= 2 && envs[1] == "--priv") {
+        let lock = gstate.read().await;
+    
+        let email = lock.email.clone().unwrap();
+        let pass_sha256 = lock.pass_sha256.clone().unwrap();
+        let tyb_apikey = lock.tyb_apikey.clone().unwrap();
+        let node_id = lock.node_id.clone().unwrap();
+
+        drop(lock);
+
+        // check if authtoken exists in mongo
+        let f_query = ngrok_utils::get_token(email.clone(), pass_sha256.clone(), tyb_apikey.clone());
+        let f_query = tokio::spawn(f_query);
+
+        // check if authtoken is already in ngrok config
+        let f_installed = ngrok_utils::token_is_installed();
+        let f_installed = tokio::spawn(f_installed);
+
+        let query = f_query.await;
+        let installed = f_installed.await;
+
+        let mut attach_tok = true;
+        if let Ok(Ok(b)) = installed {
+            attach_tok = !b;
+        }
+
+
+        if attach_tok {
+            if let Ok(Some(tok)) = query {
+                // if the token is not attached, but we got it from mongo, attach it
+                let f = ngrok_utils::attach_token(&tok);
+                f.await.unwrap();
+            }
+            else {
+                // if it's not attached and not in mongo, prompt for it. 
+                let url = "https://dashboard.ngrok.com/get-started/your-authtoken";
+                let mut prompt = format!("Please sign up for an ngrok account and get your api token at {}", url);
+                prompt.push_str("\nPlease enter that auth token here: ");
+
+                let tok = crypt_utils::prompt_secret(&prompt);
+                let f = tokio::spawn(ngrok_utils::attach_token(tok.clone()));
+                let f_mong = tokio::spawn(
+                    ngrok_utils::store_token(email.clone(), pass_sha256.clone(), tyb_apikey.clone(), tok.clone())
+                );
+
+                f.await.unwrap().unwrap();
+                let _ = f_mong.await;
+            }
+        }
+
+        let _public_addr = ngrok_utils::make_public(&email, &pass_sha256, &node_id)
+            .await
+            .unwrap();
+        println!("TynkerBase Agent running publicly!");
+
+    }
+
     // Specify configuration
     let tls_paths = tls_utils::get_cert_paths();
     let config = Config {
@@ -396,6 +480,11 @@ fn rocket() -> _ {
         ..Config::default()
     };
     let figment = Figment::from(config);
+
+    // Ensure all fields are filled before hosting
+    let lock = gstate.read().await;
+    assert!(lock.check_status());
+    drop(lock);
 
     rocket::custom(figment)
         .mount("/", routes![root, identify])
@@ -421,3 +510,4 @@ fn rocket() -> _ {
             install_openssl,
         ])
 }
+
