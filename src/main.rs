@@ -4,8 +4,9 @@ mod tls_utils;
 mod ngrok_utils;
 mod global_state;
 
-use consts::AGENT_ROOTDIR_PATH;
+use consts::{AGENT_ROOTDIR_PATH, SERVER_ENDPOINT};
 use global_state::{GlobalState, TsGlobalState};
+use tokio::runtime::Runtime;
 use tynkerbase_universal::{
     crypt_utils::{
         self, compression_utils, hash_utils, BinaryPacket 
@@ -61,8 +62,28 @@ async fn load_apikey(email: &str, pass_sha256: &str, pass_sha384: &str) -> Strin
     crypt_utils::gen_apikey(pass_sha384, &salt)
 }
 
-fn load_node_id() -> String {
-    // Generate/read Server ID
+async fn prompt_node_name(email: &str, pass_sha256: &str) -> String {
+    loop {
+        let name = crypt_utils::prompt("Enter a name for this node: ");
+
+        let endpoint = format!("{SERVER_ENDPOINT}/ngrok//check-node-exists/name?\
+            email={email}&\
+            pass_sha256={pass_sha256}&\
+            name={}", &name);
+
+        let res = reqwest::get(endpoint)
+            .await
+            .unwrap();
+
+        if res.text().await.unwrap() == "false" {
+            return name;
+        }
+        println!("\n\nError: node name `{}` already exists: ", name);
+    }
+}
+
+fn load_node_info(email: &str, pass_sha256: &str) -> (String, String) {
+    // Generate/read Server ID & name
     let id_len = 32;
     let mut path_str = format!("{}/data", AGENT_ROOTDIR_PATH);
     let path = Path::new(&path_str);
@@ -70,18 +91,27 @@ fn load_node_id() -> String {
         fs::create_dir(&path)
             .unwrap();
     }
-    path_str.push_str("/ID.txt");
+    path_str.push_str("/node-info.bin");
     let path = Path::new(&path_str);
     if !path.exists() {
+        let rt = Runtime::new().unwrap();
+
         let mut rng = thread_rng();
         let id = (0..id_len)
             .map(|_| rng.gen_range(97..97+26) as u8)
             .collect();
         let id = String::from_utf8(id).unwrap();
         fs::write(&path_str, &id).unwrap();
-        return id;
+        let name = prompt_node_name(email, pass_sha256);
+        let name = rt.block_on(name);
+
+        let result = (id, name);
+        let binary = bincode::serialize(&result).unwrap();
+        fs::write(path, binary).unwrap();
+        return result;
     }
-    fs::read_to_string(&path_str).unwrap()
+    let res = fs::read(&path_str).unwrap();
+    bincode::deserialize(&res).unwrap()
 }
 
 struct ApiKey(
@@ -366,10 +396,14 @@ async fn rocket() -> _ {
 
     let mut lock = gstate.write().await;
     lock.tyb_apikey = Some(load_apikey(&email, &pass_sha256, &pass_sha384).await);
+    let (node_id, name) = load_node_info(&email, &pass_sha256);
+    lock.node_id = Some(node_id);
+    lock.name = Some(name);
+
     lock.email = Some(email);
     lock.pass_sha256 = Some(pass_sha256);
     lock.pass_sha384 = Some(pass_sha384);
-    lock.node_id = Some(load_node_id());
+
     drop(lock);
     drop(password);
 
@@ -421,6 +455,7 @@ async fn rocket() -> _ {
         let pass_sha256 = lock.pass_sha256.clone().unwrap();
         let tyb_apikey = lock.tyb_apikey.clone().unwrap();
         let node_id = lock.node_id.clone().unwrap();
+        let name = lock.name.clone().unwrap();
 
         drop(lock);
 
@@ -464,7 +499,7 @@ async fn rocket() -> _ {
             }
         }
 
-        let _public_addr = ngrok_utils::make_public(&email, &pass_sha256, &node_id)
+        let _public_addr = ngrok_utils::make_public(&email, &pass_sha256, &node_id, &name)
             .await
             .unwrap();
         println!("TynkerBase Agent running publicly!");

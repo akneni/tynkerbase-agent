@@ -114,10 +114,11 @@ pub async fn token_is_installed() -> Result<bool> {
 }
 
 // Uses ngrok to make service public and inserts the public address into mongo
-pub async fn make_public<T: AsRef<str>>(email: T , pass_sha256: T, node_id: T) -> Result<String>{
+pub async fn make_public<T: AsRef<str>>(email: T , pass_sha256: T, node_id: T, name: T) -> Result<String>{
     let email = email.as_ref();
     let pass_sha256 = pass_sha256.as_ref();
     let node_id = node_id.as_ref();
+    let name = name.as_ref();
 
     let public_addr = spawn_ngrok(10.).await?;
 
@@ -125,6 +126,7 @@ pub async fn make_public<T: AsRef<str>>(email: T , pass_sha256: T, node_id: T) -
         email={email}\
         &pass_sha256={pass_sha256}\
         &node_id={node_id}\
+        &name={name}\
         &addr={public_addr}");
 
     let _ = reqwest::Client::new()
