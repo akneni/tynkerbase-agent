@@ -82,7 +82,7 @@ async fn prompt_node_name(email: &str, pass_sha256: &str) -> String {
     }
 }
 
-fn load_node_info(email: &str, pass_sha256: &str) -> (String, String) {
+async fn load_node_info(email: &str, pass_sha256: &str) -> (String, String) {
     // Generate/read Server ID & name
     let id_len = 32;
     let mut path_str = format!("{}/data", AGENT_ROOTDIR_PATH);
@@ -94,16 +94,13 @@ fn load_node_info(email: &str, pass_sha256: &str) -> (String, String) {
     path_str.push_str("/node-info.bin");
     let path = Path::new(&path_str);
     if !path.exists() {
-        let rt = Runtime::new().unwrap();
-
-        let mut rng = thread_rng();
         let id = (0..id_len)
-            .map(|_| rng.gen_range(97..97+26) as u8)
+            .map(|_| thread_rng().gen_range(97..97+26) as u8)
             .collect();
         let id = String::from_utf8(id).unwrap();
         fs::write(&path_str, &id).unwrap();
         let name = prompt_node_name(email, pass_sha256);
-        let name = rt.block_on(name);
+        let name = name.await;
 
         let result = (id, name);
         let binary = bincode::serialize(&result).unwrap();
@@ -396,7 +393,7 @@ async fn rocket() -> _ {
 
     let mut lock = gstate.write().await;
     lock.tyb_apikey = Some(load_apikey(&email, &pass_sha256, &pass_sha384).await);
-    let (node_id, name) = load_node_info(&email, &pass_sha256);
+    let (node_id, name) = load_node_info(&email, &pass_sha256).await;
     lock.node_id = Some(node_id);
     lock.name = Some(name);
 
