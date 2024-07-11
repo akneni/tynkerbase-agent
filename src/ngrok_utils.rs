@@ -5,8 +5,7 @@ use bincode;
 use tokio::process::Command as TkCommand;
 use reqwest;
 use std::{
-    process::{Command, Stdio},
-    time::Duration,
+    fs, process::{self, Command, Stdio}, time::Duration
 };
 
 pub async fn store_token<T: AsRef<str>>(email: T , pass_sha256: T, tyb_apikey: T, ng_token: String) -> Result<()> {
@@ -101,11 +100,35 @@ pub async fn attach_token(ng_token: impl AsRef<str>) -> Result<()> {
 
 pub async fn token_is_installed() -> Result<bool> {
     let child = TkCommand::new("ngrok")
+        .args(["config", "check"])
         .output()
         .await
         .map_err(|e| anyhow!("Failed to start process -> {}", e))?;
 
-    Ok(child.status.success())
+    if !child.status.success() {
+        println!("Error running `ngrok config check`. Please make sure you have ngrok installed.");
+        process::exit(1);
+    }
+    let output = String::from_utf8(child.stdout).unwrap();
+    let path = output.split_once("/").unwrap().1;
+    let path = format!("/{}", path);
+
+    let config_file = match fs::read_to_string(&path) {
+        Ok(c) => c,
+        Err(_e) => {
+            #[cfg(debug_assertions)] {
+                // This function may panic if not run in root mode.
+                // Automatically return true to allow for development and 
+                // testing in non root mode.
+                println!("Warning, cannot read config file in non-root mode. Returning true.");
+                return Ok(true);
+            }
+            #[allow(unreachable_code)] {
+                return Err(anyhow!("Error finding ngrok config file. -> {}", _e));
+            }
+        }
+    };
+    Ok(config_file.contains("authtoken:"))
 }
 
 // Uses ngrok to make service public and inserts the public address into mongo

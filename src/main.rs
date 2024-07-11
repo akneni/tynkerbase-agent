@@ -465,8 +465,6 @@ async fn rocket() -> _ {
     let envs = env::args().collect::<Vec<String>>();
     if !(envs.len() >= 2 && envs[1] == "--priv") {
         let lock = gstate.read().await;
-
-        println!("Acquired read lock");
     
         let email = lock.email.clone().unwrap();
         let pass_sha256 = lock.pass_sha256.clone().unwrap();
@@ -496,6 +494,7 @@ async fn rocket() -> _ {
         if attach_tok {
             if let Ok(Some(tok)) = query {
                 // if the token is not attached, but we got it from mongo, attach it
+                #[cfg(debug_assertions)] println!("Token: {}", tok);
                 let f = ngrok_utils::attach_token(&tok);
                 f.await.unwrap();
             }
