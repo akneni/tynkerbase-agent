@@ -52,6 +52,7 @@ pub async fn get_token(email: impl AsRef<str>, pass_sha256: impl AsRef<str>, tyb
 
     let res = reqwest::Client::new()
         .get(&endpoint)
+        .timeout(Duration::from_secs(5))
         .send()
         .await;
 
@@ -66,7 +67,10 @@ pub async fn get_token(email: impl AsRef<str>, pass_sha256: impl AsRef<str>, tyb
     };
 
     // Decrypt token
-    let mut aes_ng: aes_utils::AesMsg = bincode::deserialize(&body).unwrap();
+    let mut aes_ng: aes_utils::AesMsg = match bincode::deserialize(&body) {
+        Ok(a) => a,
+        Err(_) => return None,
+    };
     let aes = aes_utils::AesEncryption::from_tyb_apikey(tyb_apikey);
     aes.decrypt(&mut aes_ng)
         .unwrap();
@@ -97,20 +101,11 @@ pub async fn attach_token(ng_token: impl AsRef<str>) -> Result<()> {
 
 pub async fn token_is_installed() -> Result<bool> {
     let child = TkCommand::new("ngrok")
-        .args(["http", "45824"])
         .output()
         .await
         .map_err(|e| anyhow!("Failed to start process -> {}", e))?;
 
-    if child.status.success() {
-        return Ok(true);
-    }
-
-    let err = String::from_utf8(child.stderr).unwrap();
-    if !err.contains("ERR_NGROK_4018") {
-        return Err(anyhow!("unknown error -> {}", err));
-    }
-    Ok(false)
+    Ok(child.status.success())
 }
 
 // Uses ngrok to make service public and inserts the public address into mongo

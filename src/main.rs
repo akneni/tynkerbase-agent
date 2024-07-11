@@ -6,7 +6,6 @@ mod global_state;
 
 use consts::{AGENT_ROOTDIR_PATH, SERVER_ENDPOINT};
 use global_state::{GlobalState, TsGlobalState};
-use tokio::runtime::Runtime;
 use tynkerbase_universal::{
     crypt_utils::{
         self, compression_utils, hash_utils, BinaryPacket 
@@ -66,7 +65,7 @@ async fn prompt_node_name(email: &str, pass_sha256: &str) -> String {
     loop {
         let name = crypt_utils::prompt("Enter a name for this node: ");
 
-        let endpoint = format!("{SERVER_ENDPOINT}/ngrok//check-node-exists/name?\
+        let endpoint = format!("{SERVER_ENDPOINT}/ngrok/check-node-exists/name?\
             email={email}&\
             pass_sha256={pass_sha256}&\
             name={}", &name);
@@ -75,9 +74,20 @@ async fn prompt_node_name(email: &str, pass_sha256: &str) -> String {
             .await
             .unwrap();
 
-        if res.text().await.unwrap() == "false" {
+        if !res.status().is_success() {
+            println!("Error communicating with database. This is an error with tynkerbase.");
+            #[cfg(debug_assertions)] {
+                println!("Error Res -> \n{:?}\n\n", res);
+            }
+            process::exit(1);
+        }
+
+        let text = res.text().await.unwrap();
+        if text == "false" {
             return name;
         }
+
+
         println!("\n\nError: node name `{}` already exists: ", name);
     }
 }
@@ -93,23 +103,31 @@ async fn load_node_info(email: &str, pass_sha256: &str) -> (String, String) {
     }
     path_str.push_str("/node-info.bin");
     let path = Path::new(&path_str);
-    if !path.exists() {
-        let id = (0..id_len)
-            .map(|_| thread_rng().gen_range(97..97+26) as u8)
-            .collect();
-        let id = String::from_utf8(id).unwrap();
-        fs::write(&path_str, &id).unwrap();
-        let name = prompt_node_name(email, pass_sha256);
-        let name = name.await;
 
-        let result = (id, name);
-        let binary = bincode::serialize(&result).unwrap();
-        fs::write(path, binary).unwrap();
-        return result;
+    if path.exists() {
+        let res = fs::read(&path_str).unwrap();
+        match bincode::deserialize(&res) {
+            Ok(r) => return r,
+            _ => {
+                fs::remove_file(&path_str).unwrap();
+            }
+        }
     }
-    let res = fs::read(&path_str).unwrap();
-    bincode::deserialize(&res).unwrap()
+
+    let id = (0..id_len)
+        .map(|_| thread_rng().gen_range(97..97+26) as u8)
+        .collect();
+    let id = String::from_utf8(id).unwrap();
+    fs::write(&path_str, &id).unwrap();
+    let name = prompt_node_name(email, pass_sha256);
+    let name = name.await;
+
+    let result = (id, name);
+    let binary = bincode::serialize(&result).unwrap();
+    fs::write(path, binary).unwrap();
+    result
 }
+
 
 struct ApiKey(
     #[allow(unused)]
@@ -357,8 +375,6 @@ fn get_global() -> &'static TsGlobalState {
 static GSTATE: OnceLock<TsGlobalState> = OnceLock::new();
 
 
-
-
 #[launch]
 async fn rocket() -> _ {
     // Ensure we're running on linux
@@ -390,6 +406,8 @@ async fn rocket() -> _ {
     let password = crypt_utils::prompt_secret("Enter your password: ");
     let pass_sha256 = hash_utils::sha256(&password);
     let pass_sha384 = hash_utils::sha384(&password);
+
+    // TODO: Authorize login info here
 
     let mut lock = gstate.write().await;
     lock.tyb_apikey = Some(load_apikey(&email, &pass_sha256, &pass_sha384).await);
@@ -447,6 +465,8 @@ async fn rocket() -> _ {
     let envs = env::args().collect::<Vec<String>>();
     if !(envs.len() >= 2 && envs[1] == "--priv") {
         let lock = gstate.read().await;
+
+        println!("Acquired read lock");
     
         let email = lock.email.clone().unwrap();
         let pass_sha256 = lock.pass_sha256.clone().unwrap();
