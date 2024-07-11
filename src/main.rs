@@ -479,16 +479,21 @@ async fn rocket() -> _ {
         let f_query = tokio::spawn(f_query);
 
         // check if authtoken is already in ngrok config
-        let f_installed = ngrok_utils::token_is_installed();
-        let f_installed = tokio::spawn(f_installed);
+        // let f_installed = ngrok_utils::token_is_installed();
+        // let f_installed = tokio::spawn(f_installed);
+        /*
+        TODO:
+            ngrok_utils::token_is_installed() fails in root mode due to 
+            oddities in the ngrok cli tool. Find a work around for this.
+        */
 
         let query = f_query.await;
-        let installed = f_installed.await;
+        // let installed = f_installed.await;
 
-        let mut attach_tok = true;
-        if let Ok(Ok(b)) = installed {
-            attach_tok = !b;
-        }
+        let attach_tok = true;
+        // if let Ok(Ok(b)) = installed {
+        //     attach_tok = !b;
+        // }
 
 
         if attach_tok {
