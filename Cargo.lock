@@ -2207,12 +2207,13 @@ dependencies = [
  "serde_json",
  "tokio",
  "tynkerbase_universal",
+ "url",
 ]
 
 [[package]]
 name = "tynkerbase_universal"
 version = "0.1.0"
-source = "git+https://github.com/akneni/tynkerbase-universal.git?branch=master#d0d789185e043fc882a1d74b87db367095b38a17"
+source = "git+https://github.com/akneni/tynkerbase-universal.git?branch=master#848723fd3d0dfc2aa766eca9100c5253971b0557"
 dependencies = [
  "anyhow",
  "bincode",

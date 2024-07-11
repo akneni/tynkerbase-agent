@@ -1,9 +1,13 @@
 use crate::consts::SERVER_ENDPOINT;
-use tynkerbase_universal::crypt_utils::aes_utils;
+use tynkerbase_universal::{
+    crypt_utils::aes_utils,
+    netwk_utils::Node,
+};
 use anyhow::{anyhow, Result};
 use bincode;
 use tokio::process::Command as TkCommand;
 use reqwest;
+use url;
 use std::{
     fs, process::{self, Command, Stdio}, time::Duration
 };
@@ -68,7 +72,10 @@ pub async fn get_token(email: impl AsRef<str>, pass_sha256: impl AsRef<str>, tyb
     // Decrypt token
     let mut aes_ng: aes_utils::AesMsg = match bincode::deserialize(&body) {
         Ok(a) => a,
-        Err(_) => return None,
+        Err(_e) => {
+            #[cfg(debug_assertions)] println!("Failed to deserialize ngrok auth resp: {:?}", _e);
+            return None
+        },
     };
     let aes = aes_utils::AesEncryption::from_tyb_apikey(tyb_apikey);
     aes.decrypt(&mut aes_ng)
@@ -149,18 +156,29 @@ pub async fn make_public<T: AsRef<str>>(email: T , pass_sha256: T, node_id: T, n
 
     let public_addr = spawn_ngrok(10.).await?;
 
-    let endpoint = format!("{SERVER_ENDPOINT}/ngrok/add-addr?\
-        email={email}\
-        &pass_sha256={pass_sha256}\
-        &node_id={node_id}\
-        &name={name}\
-        &addr={public_addr}");
+    let node = Node {
+        email: email.to_string(),
+        node_id: node_id.to_string(),
+        name: name.to_string(),
+        addr: public_addr.to_string(),
+    };
+    let bin = bincode::serialize(&node).unwrap();
 
-    let _ = reqwest::Client::new()
-        .get(&endpoint)
+    let endpoint = format!("{SERVER_ENDPOINT}/ngrok/add-addr?email={email}&pass_sha256={pass_sha256}");
+
+    let res = reqwest::Client::new()
+        .post(&endpoint)
+        .body(bin)
         .send()
         .await
         .map_err(|e| anyhow!("Error sending req -> {}", e))?;
+
+    #[cfg(debug_assertions)] {
+        if !res.status().is_success() {
+            println!("Error in API call saving public address to mongo:\n\n{:#?}", res);
+            process::exit(0);
+        }
+    }
 
     Ok(public_addr)
 }
