@@ -98,6 +98,7 @@ pub async fn attach_token(ng_token: impl AsRef<str>) -> Result<()> {
     Ok(())
 }
 
+#[allow(dead_code)]
 pub async fn token_is_installed() -> Result<bool> {
     let child = TkCommand::new("ngrok")
         .args(["config", "check"])
