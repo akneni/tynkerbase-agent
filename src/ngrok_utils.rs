@@ -175,7 +175,7 @@ async fn spawn_ngrok (timeout: f64) -> Result<String> {
     */
 
     let _ = Command::new("ngrok")
-        .args(["http", "7462"])
+        .args(["http", "https://localhost:7462"])
         .stdout(Stdio::null())
         .spawn()
         .unwrap();
