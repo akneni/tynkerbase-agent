@@ -515,10 +515,10 @@ async fn rocket() -> _ {
             }
         }
 
-        let _public_addr = ngrok_utils::make_public(&email, &pass_sha256, &node_id, &name)
+        let public_addr = ngrok_utils::make_public(&email, &pass_sha256, &node_id, &name)
             .await
             .unwrap();
-        println!("TynkerBase Agent running publicly!");
+        println!("TynkerBase Agent running publicly on: {}", &public_addr);
 
     }
 
