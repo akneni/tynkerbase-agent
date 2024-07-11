@@ -107,6 +107,14 @@ pub async fn token_is_installed() -> Result<bool> {
 
     if !child.status.success() {
         println!("Error running `ngrok config check`. Please make sure you have ngrok installed.");
+        #[cfg(debug_assertions)] {
+            println!("Running `ngrok config check` for debug mode.");
+            let mut child = TkCommand::new("ngrok")
+                .args(["config", "check"])
+                .spawn()
+                .unwrap();
+            child.wait().await.unwrap();
+        }
         process::exit(1);
     }
     let output = String::from_utf8(child.stdout).unwrap();
