@@ -7,7 +7,6 @@ use anyhow::{anyhow, Result};
 use bincode;
 use tokio::process::Command as TkCommand;
 use reqwest;
-use url;
 use std::{
     fs, process::{self, Command, Stdio}, time::Duration
 };
@@ -16,11 +15,10 @@ pub async fn store_token<T: AsRef<str>>(email: T , pass_sha256: T, tyb_apikey: T
     let email = email.as_ref();
     let pass_sha256 = pass_sha256.as_ref();
     let tyb_apikey = tyb_apikey.as_ref();
-    let ng_token = ng_token.as_ref();
 
     // encrypt ng_token
     let aes = aes_utils::AesEncryption::from_tyb_apikey(tyb_apikey);
-    let mut aes_ng = aes_utils::AesMsg::from_str(ng_token);
+    let mut aes_ng = aes_utils::AesMsg::from_str(&ng_token);
     aes.encrypt(&mut aes_ng)
         .map_err(|e| anyhow!("Failed to encrypt -> {}", e))?;
     assert!(aes_ng.is_encrypted);
@@ -61,12 +59,22 @@ pub async fn get_token(email: impl AsRef<str>, pass_sha256: impl AsRef<str>, tyb
 
     let res = match res {
         Ok(r) => r,
-        _ => return None,
+        Err(e) => {
+            #[cfg(debug_assertions)] {
+                println!("Error getting ngrok token -> {}", e);
+            }
+            return None
+        },
     };
     
     let body = match res.bytes().await {
         Ok(r) => r.to_vec(),
-        _ => return None,
+        Err(e) => {
+            #[cfg(debug_assertions)] {
+                println!("Error getting bytes from response -> {}", e);
+            }
+            return None
+        },
     };
 
     // Decrypt token
@@ -174,10 +182,12 @@ pub async fn make_public<T: AsRef<str>>(email: T , pass_sha256: T, node_id: T, n
         .map_err(|e| anyhow!("Error sending req -> {}", e))?;
 
     #[cfg(debug_assertions)] {
-        if !res.status().is_success() {
-            println!("Error in API call saving public address to mongo:\n\n{:#?}", res);
-            process::exit(0);
-        }
+        println!("RES -> {:#?}\n\n", &res);
+        println!("RES TEXT -> {:?}\n\n", res.text().await);
+        // if !res.status().is_success() {
+        //     println!("Error in API call saving public address to mongo:\n\n{:#?}", res);
+        //     process::exit(0);
+        // }
     }
 
     Ok(public_addr)
