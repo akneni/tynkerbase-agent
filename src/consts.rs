@@ -2,7 +2,8 @@ const fn get_proj_path() -> &'static str {
     // Allows developers to build and test in their local project directory
     // rather than directly in /usr/share
 
-    #[cfg(debug_assertions)] {
+    #[cfg(debug_assertions)]
+    {
         return ".";
     }
     #[allow(unreachable_code)]

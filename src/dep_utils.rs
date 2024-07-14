@@ -1,6 +1,6 @@
-use std::process::Command;
-use std::env::consts::OS;
 use anyhow::{anyhow, Result};
+use std::env::consts::OS;
+use std::process::Command;
 
 pub fn find_package_manager() -> Result<&'static str> {
     if OS != "linux" {
@@ -9,7 +9,12 @@ pub fn find_package_manager() -> Result<&'static str> {
     let package_managers = ["apt-get", "yum", "dnf", "pacman"];
 
     for &pm in &package_managers {
-        if Command::new("which").arg(pm).output().ok().map_or(false, |output| output.status.success()) {
+        if Command::new("which")
+            .arg(pm)
+            .output()
+            .ok()
+            .map_or(false, |output| output.status.success())
+        {
             return Ok(pm);
         }
     }
@@ -18,14 +23,12 @@ pub fn find_package_manager() -> Result<&'static str> {
 }
 
 pub mod docker {
-    use std::process::Command;
-    use anyhow::{anyhow, Result};
     use super::find_package_manager;
+    use anyhow::{anyhow, Result};
+    use std::process::Command;
 
     pub fn check_docker() -> bool {
-        let output = Command::new("docker")
-            .arg("--version")
-            .output();
+        let output = Command::new("docker").arg("--version").output();
 
         match output {
             Ok(output) => output.status.success(),
@@ -43,22 +46,22 @@ pub mod docker {
                 Command::new("sudo")
                     .args(["apt-get", "install", "-y", "docker.io"])
                     .status()?;
-            },
+            }
             "yum" => {
                 Command::new("sudo")
                     .args(["yum", "install", "-y", "docker"])
                     .status()?;
-            },
+            }
             "dnf" => {
                 Command::new("sudo")
                     .args(["dnf", "install", "-y", "docker"])
                     .status()?;
-            },
+            }
             "pacman" => {
                 Command::new("sudo")
                     .args(["pacman", "-Syu", "--noconfirm", "docker"])
                     .status()?;
-            },
+            }
             _ => return Err(anyhow!("Unsupported package manager")),
         }
 
@@ -75,15 +78,13 @@ pub mod docker {
             _ => unreachable!(),
         }
     }
-
 }
 
-
 pub mod openssl {
-    use std::process::Command;
-    use std::env::consts::OS;
-    use anyhow::{anyhow, Result};
     use super::find_package_manager;
+    use anyhow::{anyhow, Result};
+    use std::env::consts::OS;
+    use std::process::Command;
 
     pub fn check_openssl() -> bool {
         // Checks if openssl is installed by running `openssl version`
@@ -95,9 +96,7 @@ pub mod openssl {
                     false
                 }
             }
-            Err(_e) => {
-                false
-            }
+            Err(_e) => false,
         }
     }
 
@@ -114,28 +113,32 @@ pub mod openssl {
             "pacman" => ("sudo", "pacman -S --noconfirm openssl"),
             _ => unreachable!(),
         };
-    
+
         println!("Installing OpenSSL...");
-    
+
         let status = Command::new(install_command.0)
             .args(install_command.1.split(' '))
             .status()
             .map_err(|e| anyhow!("Failed to execute install command -> {e}"))?;
-    
+
         if !status.success() {
             return Err(anyhow!("Failed to install OpenSSL"));
         }
-    
+
         Ok(())
     }
 
     pub fn get_install_command() -> Result<Vec<&'static str>> {
         let pm = find_package_manager()?;
         match pm {
-            "apt-get" => Ok("apt-get install -y openssl".split_ascii_whitespace().collect()),
+            "apt-get" => Ok("apt-get install -y openssl"
+                .split_ascii_whitespace()
+                .collect()),
             "yum" => Ok("yum install -y openssl".split_ascii_whitespace().collect()),
-            "dnf" => Ok("dnf install -y openssl".split_ascii_whitespace().collect()),        
-            "pacman" => Ok("pacman -S --noconfirm openssl".split_ascii_whitespace().collect()), 
+            "dnf" => Ok("dnf install -y openssl".split_ascii_whitespace().collect()),
+            "pacman" => Ok("pacman -S --noconfirm openssl"
+                .split_ascii_whitespace()
+                .collect()),
             _ => unreachable!(),
         }
     }

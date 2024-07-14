@@ -22,13 +22,12 @@ fn get_manufacturer() -> Option<String> {
                 Ok(s) => Some(s),
                 _ => None,
             }
-        },
+        }
         _ => None,
     }
 }
 
 #[allow(unused)]
 fn get_cpu_data() {
-    let output = Command::new("lscpu")
-        .output();
+    let output = Command::new("lscpu").output();
 }

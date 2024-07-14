@@ -1,48 +1,58 @@
 mod consts;
 mod dep_utils;
-mod tls_utils;
-mod ngrok_utils;
-mod global_state;
 mod diagnostics;
+mod docker_utils;
+mod global_state;
+mod ngrok_utils;
 mod proj_utils;
+mod tls_utils;
 
+use bincode;
 use consts::{AGENT_ROOTDIR_PATH, SERVER_ENDPOINT};
 use global_state::{GlobalState, TsGlobalState};
-use tynkerbase_universal::{
-    constants::{self as univ_consts, LINUX_TYNKERBASE_PATH}, crypt_utils::{
-        self, compression_utils, hash_utils, BinaryPacket 
-    }, docker_utils, file_utils::FileCollection
-};
-use bincode;
-use rocket::{
-    self, catchers, config::{Config, TlsConfig}, data::{Limits, ToByteUnit}, figment::Figment, http::Status, launch, outcome::Outcome, request::{self, FromRequest}, response::{
-        status::Custom,
-        stream::TextStream,
-    }, routes, Request
-};
 use rand::{thread_rng, Rng};
+use rocket::{
+    self, catchers,
+    config::{Config, TlsConfig},
+    data::{Limits, ToByteUnit},
+    figment::Figment,
+    http::Status,
+    launch,
+    outcome::Outcome,
+    request::{self, FromRequest},
+    response::{status::Custom, stream::TextStream},
+    routes, Request,
+};
+use tynkerbase_universal::{
+    constants::LINUX_TYNKERBASE_PATH,
+    crypt_utils::{self, compression_utils, hash_utils, BinaryPacket},
+    file_utils::FileCollection,
+};
 
 use std::{
-    env, io::{BufRead, BufReader}, path::PathBuf, process::{self, Command, Stdio}, sync::OnceLock, time::Duration
+    env,
+    io::{BufRead, BufReader},
+    path::PathBuf,
+    process::{self, Command, Stdio},
+    sync::OnceLock,
 };
 
 // Suppress warning being thrown since OS is only used in release mode
 #[allow(unused_imports)]
-use std::{
-    fs,
-    path::Path,
-    env::consts::OS,
-};
+use std::{env::consts::OS, fs, path::Path};
 
 async fn load_apikey(email: &str, pass_sha256: &str, pass_sha384: &str) -> String {
     const ENDPOINT: &str = "https://tynkerbase-server.shuttleapp.rs";
-    let endpoint = format!("{}/auth/login?email={}&pass_sha256={}", ENDPOINT, &email, &pass_sha256);
+    let endpoint = format!(
+        "{}/auth/login?email={}&pass_sha256={}",
+        ENDPOINT, &email, &pass_sha256
+    );
 
-    let res = reqwest::get(&endpoint)
+    let res = reqwest::get(&endpoint).await.unwrap();
+
+    let salt = res
+        .text()
         .await
-        .unwrap();
-
-    let salt = res.text().await
         .expect("unable to extract text from response");
 
     crypt_utils::gen_apikey(pass_sha384, &salt)
@@ -52,18 +62,20 @@ async fn prompt_node_name(email: &str, pass_sha256: &str) -> String {
     loop {
         let name = crypt_utils::prompt("Enter a name for this node: ");
 
-        let endpoint = format!("{SERVER_ENDPOINT}/ngrok/check-node-exists/name?\
+        let endpoint = format!(
+            "{SERVER_ENDPOINT}/ngrok/check-node-exists/name?\
             email={email}&\
             pass_sha256={pass_sha256}&\
-            name={}", &name);
+            name={}",
+            &name
+        );
 
-        let res = reqwest::get(endpoint)
-            .await
-            .unwrap();
+        let res = reqwest::get(endpoint).await.unwrap();
 
         if !res.status().is_success() {
             println!("Error communicating with database. This is an error with tynkerbase.");
-            #[cfg(debug_assertions)] {
+            #[cfg(debug_assertions)]
+            {
                 println!("Error Res -> \n{:?}\n\n", res);
             }
             process::exit(1);
@@ -73,7 +85,6 @@ async fn prompt_node_name(email: &str, pass_sha256: &str) -> String {
         if text == "false" {
             return name;
         }
-
 
         println!("\n\nError: node name `{}` already exists: ", name);
     }
@@ -85,8 +96,7 @@ async fn load_node_info(email: &str, pass_sha256: &str) -> (String, String) {
     let mut path_str = format!("{}/data", AGENT_ROOTDIR_PATH);
     let path = Path::new(&path_str);
     if !path.exists() {
-        fs::create_dir(&path)
-            .unwrap();
+        fs::create_dir(&path).unwrap();
     }
     path_str.push_str("/node-info.bin");
     let path = Path::new(&path_str);
@@ -102,7 +112,7 @@ async fn load_node_info(email: &str, pass_sha256: &str) -> (String, String) {
     }
 
     let id = (0..id_len)
-        .map(|_| thread_rng().gen_range(97..97+26) as u8)
+        .map(|_| thread_rng().gen_range(97..97 + 26) as u8)
         .collect();
     let id = String::from_utf8(id).unwrap();
     fs::write(&path_str, &id).unwrap();
@@ -115,11 +125,7 @@ async fn load_node_info(email: &str, pass_sha256: &str) -> (String, String) {
     result
 }
 
-
-struct ApiKey(
-    #[allow(unused)]
-    String
-);
+struct ApiKey(#[allow(unused)] String);
 
 #[rocket::async_trait]
 impl<'a> FromRequest<'a> for ApiKey {
@@ -134,7 +140,7 @@ impl<'a> FromRequest<'a> for ApiKey {
                     return Outcome::Success(ApiKey(key.to_string()));
                 }
                 Outcome::Error((Status::Forbidden, ()))
-            },
+            }
             _ => Outcome::Error((Status::Forbidden, ())),
         }
     }
@@ -159,14 +165,17 @@ async fn add_files_to_proj(
     name: &str,
     data: Vec<u8>,
     #[allow(unused)] apikey: ApiKey,
-) -> Custom<String> {   
+) -> Custom<String> {
     let _ = proj_utils::clear_proj(&name);
-    
+
     let packet: BinaryPacket = bincode::deserialize(&data).unwrap();
     let files: FileCollection = bincode::deserialize(&packet.data).unwrap();
 
     if let Err(e) = proj_utils::add_files_to_proj(name, files) {
-        return Custom(Status::InternalServerError, format!("Error adding files to project -> {e}"));
+        return Custom(
+            Status::InternalServerError,
+            format!("Error adding files to project -> {e}"),
+        );
     }
 
     Custom(Status::Ok, "success".to_string())
@@ -207,10 +216,12 @@ fn pull_proj_files(name: &str, #[allow(unused)] apikey: ApiKey) -> Custom<Vec<u8
         Ok(fc) => fc,
         Err(e) => {
             return Custom(
-                Status::InternalServerError, 
-                format!("Error starting docker daemon -> {e}").as_bytes().to_vec()
+                Status::InternalServerError,
+                format!("Error starting docker daemon -> {e}")
+                    .as_bytes()
+                    .to_vec(),
             );
-        },
+        }
     };
 
     let mut out_packet = BinaryPacket::from(&fc).unwrap();
@@ -219,31 +230,37 @@ fn pull_proj_files(name: &str, #[allow(unused)] apikey: ApiKey) -> Custom<Vec<u8
     }
 
     let payload = bincode::serialize(&out_packet).unwrap();
-    
+
     Custom(Status::Ok, payload)
 }
 
 #[rocket::post("/start-docker-daemon")]
-fn start_docker_daemon(#[allow(unused)] apikey: ApiKey) -> Custom<String> {
-    if let Err(e) = docker_utils::start_daemon() {
-        return Custom(Status::InternalServerError, format!("Error starting docker daemon -> {e}"));
+async fn start_docker_daemon(#[allow(unused)] apikey: ApiKey) -> Custom<String> {
+    if let Err(e) = docker_utils::start_daemon().await {
+        return Custom(
+            Status::InternalServerError,
+            format!("Error starting docker daemon -> {e}"),
+        );
     }
-    
+
     Custom(Status::Ok, "success".to_string())
 }
 
 #[rocket::get("/end-docker-daemon")]
-fn end_docker_daemon(#[allow(unused)] apikey: ApiKey) -> Custom<String> {
-    if let Err(e) = docker_utils::end_daemon() {
-        return Custom(Status::InternalServerError, format!("Failed to end daemon: {e}"));
+async fn end_docker_daemon(#[allow(unused)] apikey: ApiKey) -> Custom<String> {
+    if let Err(e) = docker_utils::end_daemon().await {
+        return Custom(
+            Status::InternalServerError,
+            format!("Failed to end daemon: {e}"),
+        );
     }
-    
+
     Custom(Status::Ok, "success".to_string())
 }
 
 #[rocket::get("/get-daemon-status")]
-fn get_daemon_status(#[allow(unused)] apikey: ApiKey) -> Custom<String> {
-    let status = match docker_utils::get_engine_status() {
+async fn get_daemon_status(#[allow(unused)] apikey: ApiKey) -> Custom<String> {
+    let status = match docker_utils::get_engine_status().await {
         Ok(b) => b,
         Err(e) => return Custom(Status::Ok, format!("Error getting daemon status: {}", e)),
     };
@@ -252,13 +269,13 @@ fn get_daemon_status(#[allow(unused)] apikey: ApiKey) -> Custom<String> {
 }
 
 #[rocket::get("/build-img?<name>")]
-fn build_image(name: &str, #[allow(unused)] apikey: ApiKey) -> Custom<String> {
+async fn build_image(name: &str, #[allow(unused)] apikey: ApiKey) -> Custom<String> {
     let mut path = PathBuf::from(LINUX_TYNKERBASE_PATH);
     path.push(name);
 
     let img_name = format!("{}_image", name);
     let res = docker_utils::build_image(path.to_str().unwrap(), &img_name);
-    if let Err(e) = res {
+    if let Err(e) = res.await {
         return Custom(Status::InternalServerError, e.to_string());
     }
 
@@ -266,11 +283,15 @@ fn build_image(name: &str, #[allow(unused)] apikey: ApiKey) -> Custom<String> {
 }
 
 #[rocket::get("/spawn-container?<name>")]
-fn spawn_container(name: &str, #[allow(unused)] apikey: ApiKey) -> Custom<String> {
+async fn spawn_container(name: &str, #[allow(unused)] apikey: ApiKey) -> Custom<String> {
     let img_name = format!("{}_image", name);
     let container_name = format!("{}_container", name);
-    if let Err(e) = docker_utils::start_container(&img_name, &container_name, vec![], vec![]) {
-        return Custom(Status::InternalServerError, format!("Failed to start container -> {e}"));
+    if let Err(e) = docker_utils::start_container(&img_name, &container_name, vec![], vec![]).await
+    {
+        return Custom(
+            Status::InternalServerError,
+            format!("Failed to start container -> {e}"),
+        );
     }
 
     Custom(Status::Ok, "success".to_string())
@@ -281,8 +302,12 @@ async fn halt_container(name: &str, #[allow(unused)] apikey: ApiKey) -> Custom<S
     let img_name = format!("{}_image", name);
     let container_name = format!("{}_container", name);
 
-    if let Err(e) = docker_utils::start_container(&img_name, &container_name, vec![], vec![]) {
-        return Custom(Status::InternalServerError, format!("Failed to start container -> {e}"));
+    if let Err(e) = docker_utils::start_container(&img_name, &container_name, vec![], vec![]).await
+    {
+        return Custom(
+            Status::InternalServerError,
+            format!("Failed to start container -> {e}"),
+        );
     }
 
     Custom(Status::Ok, "success".to_string())
@@ -304,11 +329,11 @@ async fn install_docker(#[allow(unused)] apikey: ApiKey) -> TextStream![String] 
         let stdout = child.stdout.take();
         if let Some(stdout) = stdout {
             let mut reader = BufReader::new(stdout).lines();
-    
+
             while let Some(Ok(l)) = reader.next() {
                 yield l;
             }
-            yield "\nFinished docker installation".to_string();        
+            yield "\nFinished docker installation".to_string();
         }
         else {
             yield "Failed to extract stdout from docker install process".to_string();
@@ -332,11 +357,11 @@ async fn install_openssl(#[allow(unused)] apikey: ApiKey) -> TextStream![String]
         let stdout = child.stdout.take();
         if let Some(stdout) = stdout {
             let mut reader = BufReader::new(stdout).lines();
-    
+
             while let Some(Ok(l)) = reader.next() {
                 yield l;
             }
-            yield "\nFinished OpenSSL installation".to_string();        
+            yield "\nFinished OpenSSL installation".to_string();
         }
         else {
             yield "Failed to extract stdout from OpenSSL install process".to_string();
@@ -362,18 +387,16 @@ fn handle_404(req: &Request) -> Custom<String> {
 }
 
 fn get_global() -> &'static TsGlobalState {
-    GSTATE.get_or_init(|| {
-        GlobalState::new()
-    })
+    GSTATE.get_or_init(|| GlobalState::new())
 }
 
 static GSTATE: OnceLock<TsGlobalState> = OnceLock::new();
 
-
 #[launch]
 async fn rocket() -> _ {
     // Ensure we're running on linux
-    #[cfg(not(debug_assertions))] {
+    #[cfg(not(debug_assertions))]
+    {
         if OS != "linux" {
             println!("Unfortunately, we only support linux at the current time.");
             process::exit(0);
@@ -382,7 +405,7 @@ async fn rocket() -> _ {
 
     // Create TynkerBase Directory
     #[cfg(not(debug_assertions))] {
-        let path =  Path::new(univ_consts::LINUX_TYNKERBASE_PATH);
+        let path = Path::new(LINUX_TYNKERBASE_PATH);
         if !path.exists() {
             if let Err(e) = fs::create_dir_all(path) {
                 if e.to_string().contains("Permission denied") {
@@ -402,11 +425,12 @@ async fn rocket() -> _ {
     let pass_sha256 = hash_utils::sha256(&password);
     let pass_sha384 = hash_utils::sha384(&password);
 
-    // Authorize login info 
-    let endpoint = format!("{}/auth/login?email={}&pass_sha256={}", SERVER_ENDPOINT, email, pass_sha256);
-    let res = reqwest::get(&endpoint)
-        .await
-        .unwrap();
+    // Authorize login info
+    let endpoint = format!(
+        "{}/auth/login?email={}&pass_sha256={}",
+        SERVER_ENDPOINT, email, pass_sha256
+    );
+    let res = reqwest::get(&endpoint).await.unwrap();
     if res.status().as_u16() == 403 {
         println!("Incorrect authorization.");
         process::exit(0);
@@ -433,10 +457,12 @@ async fn rocket() -> _ {
             let res = crypt_utils::prompt("Would you like to do that now? (y/n): ");
             if res.to_ascii_lowercase() == "y" {
                 if let Err(e) = dep_utils::openssl::install_openssl() {
-                    println!("Failed to install OpenSSL, install manually.\nError -> {}", e);
+                    println!(
+                        "Failed to install OpenSSL, install manually.\nError -> {}",
+                        e
+                    );
                     process::exit(1);
-                }
-                else {
+                } else {
                     println!("Successfully installed OpenSSL!");
                 }
             }
@@ -450,14 +476,18 @@ async fn rocket() -> _ {
 
     // Ensure docker is installed
     if !dep_utils::docker::check_docker() {
-        println!("Docker is not installed. (If it's already installed, try restarting the terminal)");
+        println!(
+            "Docker is not installed. (If it's already installed, try restarting the terminal)"
+        );
         let res = crypt_utils::prompt("Install docker now? (y/n): ");
         if res.to_ascii_lowercase() == "y" {
             if let Err(e) = dep_utils::docker::install_docker() {
-                println!("Failed to install Docker, install manually.\nError -> {}", e);
+                println!(
+                    "Failed to install Docker, install manually.\nError -> {}",
+                    e
+                );
                 process::exit(1);
-            }
-            else {
+            } else {
                 println!("Successfully installed Docker!");
             }
         }
@@ -468,7 +498,7 @@ async fn rocket() -> _ {
     let envs = env::args().collect::<Vec<String>>();
     if !(envs.len() >= 2 && envs[1] == "--priv") {
         let lock = gstate.read().await;
-    
+
         let email = lock.email.clone().unwrap();
         let pass_sha256 = lock.pass_sha256.clone().unwrap();
         let tyb_apikey = lock.tyb_apikey.clone().unwrap();
@@ -478,7 +508,8 @@ async fn rocket() -> _ {
         drop(lock);
 
         // check if authtoken exists in mongo
-        let f_query = ngrok_utils::get_token(email.clone(), pass_sha256.clone(), tyb_apikey.clone());
+        let f_query =
+            ngrok_utils::get_token(email.clone(), pass_sha256.clone(), tyb_apikey.clone());
         let f_query = tokio::spawn(f_query);
 
         // check if authtoken is already in ngrok config
@@ -486,7 +517,7 @@ async fn rocket() -> _ {
         // let f_installed = tokio::spawn(f_installed);
         /*
         TODO:
-            ngrok_utils::token_is_installed() fails in root mode due to 
+            ngrok_utils::token_is_installed() fails in root mode due to
             oddities in the ngrok cli tool. Find a work around for this.
         */
 
@@ -498,25 +529,30 @@ async fn rocket() -> _ {
         //     attach_tok = !b;
         // }
 
-
         if attach_tok {
             if let Ok(Some(tok)) = query {
                 // if the token is not attached, but we got it from mongo, attach it
-                #[cfg(debug_assertions)] println!("Token: {}", tok);
+                #[cfg(debug_assertions)]
+                println!("Token: {}", tok);
                 let f = ngrok_utils::attach_token(&tok);
                 f.await.unwrap();
-            }
-            else {
-                // if it's not attached and not in mongo, prompt for it. 
+            } else {
+                // if it's not attached and not in mongo, prompt for it.
                 let url = "https://dashboard.ngrok.com/get-started/your-authtoken";
-                let mut prompt = format!("Please sign up for an ngrok account and get your api token at {}", url);
+                let mut prompt = format!(
+                    "Please sign up for an ngrok account and get your api token at {}",
+                    url
+                );
                 prompt.push_str("\nPlease enter that auth token here: ");
 
                 let tok = crypt_utils::prompt_secret(&prompt);
                 let f = tokio::spawn(ngrok_utils::attach_token(tok.clone()));
-                let f_mong = tokio::spawn(
-                    ngrok_utils::store_token(email.clone(), pass_sha256.clone(), tyb_apikey.clone(), tok.clone())
-                );
+                let f_mong = tokio::spawn(ngrok_utils::store_token(
+                    email.clone(),
+                    pass_sha256.clone(),
+                    tyb_apikey.clone(),
+                    tok.clone(),
+                ));
 
                 f.await.unwrap().unwrap();
                 let _ = f_mong.await;
@@ -527,7 +563,6 @@ async fn rocket() -> _ {
             .await
             .unwrap();
         println!("TynkerBase Agent running publicly on: {}", &public_addr);
-
     }
 
     // Specify configuration
@@ -536,8 +571,7 @@ async fn rocket() -> _ {
         address: "0.0.0.0".parse().expect("Invalid address"),
         port: 7462,
         tls: Some(TlsConfig::from_paths(&tls_paths[0], &tls_paths[1])),
-        limits: Limits::default()
-            .limit("bytes", 20.megabytes()),
+        limits: Limits::default().limit("bytes", 20.megabytes()),
         ..Config::default()
     };
     let figment = Figment::from(config);
@@ -550,26 +584,23 @@ async fn rocket() -> _ {
     rocket::custom(figment)
         .register("/", catchers![handle_404])
         .mount("/", routes![root, identify])
-        .mount("/files/proj", routes![
-                create_proj, 
-                add_files_to_proj, 
-                delete_proj, 
-                pull_proj_files, 
+        .mount(
+            "/files/proj",
+            routes![
+                create_proj,
+                add_files_to_proj,
+                delete_proj,
+                pull_proj_files,
                 list_projects,
-        ])
-        .mount("/docker/daemon", routes![
-            start_docker_daemon, 
-            end_docker_daemon, 
-            get_daemon_status,
-        ])
-        .mount("/docker/proj", routes![
-            build_image,
-            spawn_container,
-            halt_container,
-        ])
-        .mount("/dependencies", routes![
-            install_docker,
-            install_openssl,
-        ])
+            ],
+        )
+        .mount(
+            "/docker/daemon",
+            routes![start_docker_daemon, end_docker_daemon, get_daemon_status,],
+        )
+        .mount(
+            "/docker/proj",
+            routes![build_image, spawn_container, halt_container,],
+        )
+        .mount("/dependencies", routes![install_docker, install_openssl,])
 }
-

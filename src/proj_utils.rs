@@ -1,21 +1,24 @@
-use tynkerbase_universal::{
-    constants::LINUX_TYNKERBASE_PATH,
-    file_utils::FileCollection,
-};
+use tynkerbase_universal::{constants::LINUX_TYNKERBASE_PATH, file_utils::FileCollection};
 
-use std::{
-    env::consts::OS, fs, path::{Path, PathBuf}
-};
 use anyhow::{anyhow, Result};
+use std::{
+    env::consts::OS,
+    fs,
+    path::{Path, PathBuf},
+};
 
 pub fn create_proj(name: &str) -> Result<String> {
     if OS == "linux" {
         // Ensure project directory exists first
         let mut root_path = PathBuf::from(LINUX_TYNKERBASE_PATH);
         if !root_path.exists() {
-            fs::create_dir_all(&root_path)
-                .map_err(|e| anyhow!("Root project directory missing.\
-                Encountered another error when creating them -> {}", e))?;
+            fs::create_dir_all(&root_path).map_err(|e| {
+                anyhow!(
+                    "Root project directory missing.\
+                Encountered another error when creating them -> {}",
+                    e
+                )
+            })?;
         }
 
         root_path.push(name);
@@ -34,7 +37,7 @@ pub fn add_files_to_proj(name: &str, files: FileCollection) -> Result<()> {
     if OS == "linux" {
         let proj_path = format!("{LINUX_TYNKERBASE_PATH}/{name}");
         if !Path::new(&proj_path).exists() {
-            return Err(anyhow!("Project `{}` does not exist.", {name}));
+            return Err(anyhow!("Project `{}` does not exist.", { name }));
         }
 
         if let Err(e) = files.save(&proj_path) {
@@ -61,7 +64,7 @@ pub fn get_proj_names() -> Vec<String> {
             }
             res
         }
-        _ => vec![]
+        _ => vec![],
     }
 }
 

@@ -1,18 +1,13 @@
 use crate::consts::AGENT_ROOTDIR_PATH;
-use std::{
-    fs,
-    path::Path,
-    process::Command,
-};
 use anyhow::{anyhow, Result};
-
+use std::{fs, path::Path, process::Command};
 
 pub fn check_tls_cert(proj_root_path: &str) -> bool {
     if !Path::new(&format!("{proj_root_path}/keys")).exists() {
         return false;
     }
-    Path::new(&format!("{proj_root_path}/keys/tls-cert.pem")).exists() && 
-    Path::new(&format!("{proj_root_path}/keys/tls-key.pem")).exists()    
+    Path::new(&format!("{proj_root_path}/keys/tls-cert.pem")).exists()
+        && Path::new(&format!("{proj_root_path}/keys/tls-key.pem")).exists()
 }
 
 pub fn gen_tls_cert(proj_root_path: &str) -> Result<()> {
@@ -30,11 +25,12 @@ pub fn gen_tls_cert(proj_root_path: &str) -> Result<()> {
     ];
 
     println!("Generating TLS private key...\nPlease answer the following questions to generate the certificate\n");
-    let mut child = Command::new(&cmd[0])
-        .args(&cmd[1..])
-        .spawn()
-        .map_err(|e| anyhow!("Failed to generate private key -> {e}\nMake sure you have openssl installed!"))?;
-    child.wait().map_err(|e| anyhow!("Failed to wait on process -> {e}"))?;
+    let mut child = Command::new(&cmd[0]).args(&cmd[1..]).spawn().map_err(|e| {
+        anyhow!("Failed to generate private key -> {e}\nMake sure you have openssl installed!")
+    })?;
+    child
+        .wait()
+        .map_err(|e| anyhow!("Failed to wait on process -> {e}"))?;
 
     println!("Finished generating private key.\n\nGenerating TLS certificate... ");
 
@@ -52,11 +48,12 @@ pub fn gen_tls_cert(proj_root_path: &str) -> Result<()> {
         "36500".to_string(),
     ];
 
-    let mut child = Command::new(&cmd[0])
-        .args(&cmd[1..])
-        .spawn()
-        .map_err(|e| anyhow!("Failed to generate private key -> {e}\nMake sure you have openssl installed!"))?;
-    child.wait().map_err(|e| anyhow!("Failed to wait on process -> {e}"))?;
+    let mut child = Command::new(&cmd[0]).args(&cmd[1..]).spawn().map_err(|e| {
+        anyhow!("Failed to generate private key -> {e}\nMake sure you have openssl installed!")
+    })?;
+    child
+        .wait()
+        .map_err(|e| anyhow!("Failed to wait on process -> {e}"))?;
 
     println!("Finished generating all TLS dependencies.");
 
@@ -65,10 +62,10 @@ pub fn gen_tls_cert(proj_root_path: &str) -> Result<()> {
 
 pub fn clear_tls_cert(proj_root_path: &str) -> Result<()> {
     if !Path::new(&format!("{proj_root_path}/keys")).exists() {
-        fs::create_dir(&format!("{proj_root_path}/keys"))
-            .map_err(|e| anyhow!("Failed to create `keys` directory to hold the certificates -> {e}"))?;
-    }
-    else {
+        fs::create_dir(&format!("{proj_root_path}/keys")).map_err(|e| {
+            anyhow!("Failed to create `keys` directory to hold the certificates -> {e}")
+        })?;
+    } else {
         let files = ["keys/tls-key.pem", "keys/tls-cert.pem", "keys/tls-csr.csr"];
         for file in files {
             let path = format!("{proj_root_path}/{file}");
