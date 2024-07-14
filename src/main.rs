@@ -7,6 +7,7 @@ mod ngrok_utils;
 mod proj_utils;
 mod tls_utils;
 
+use anyhow::anyhow;
 use bincode;
 use consts::{AGENT_ROOTDIR_PATH, SERVER_ENDPOINT};
 use global_state::{GlobalState, TsGlobalState};
@@ -225,15 +226,19 @@ async fn purge_projects(name: &str, retries:Option<u32>, #[allow(unused)] apikey
     let container_name = format!("{}_container", name);
     let image_name = format!("{}_image", name);
 
-    let mut success = [false, false];
+    let mut success: [anyhow::Result<()>; 2] = [
+        Err(anyhow!("unknown error deleting container")),
+        Err(anyhow!("unknown error deleting image")),
+    ];
+
     for _ in 0..retries {
         let mut handles = vec![];
-        if !success[0] {
+        if success[0].is_err() {
             let f = tokio::spawn(docker_utils::delete_container(container_name.clone()));
             handles.push((f, 0));
         }
 
-        if !success[1] {
+        if success[1].is_err() {
             let f = tokio::spawn(docker_utils::delete_image(image_name.clone()));
             handles.push((f, 1));
         }
@@ -241,16 +246,28 @@ async fn purge_projects(name: &str, retries:Option<u32>, #[allow(unused)] apikey
         for (h, i) in handles {
             let res = h.await;
             if let Ok(Ok(_)) = res {
-                success[i] = true;
+                success[i] = Ok(());
+            }
+            else if let Err(e) = res {
+                success[i] = Err(anyhow!("{:?}", e));
             }
         }
-        if success.iter().all(|&b| b) {
+        if success.iter().all(|b| b.is_ok()) {
             break;
         }
     }
 
-    if !success.iter().all(|&b| b) {
-        return Custom(Status::InternalServerError, "Failed to delete images and containers".to_string());
+    if !success.iter().all(|b| b.is_ok()) {
+        let err_msg = success
+            .iter()
+            .filter(|e| e.is_err())
+            .map(|e| format!("Error -> {:?}", e))
+            .collect::<Vec<String>>()
+            .join("\n");
+        return Custom(
+            Status::InternalServerError, 
+            format!("Failed to delete images and/or containers -> {}", err_msg)
+        );
     }
 
     if let Err(e) = proj_utils::delete_proj(name) {
