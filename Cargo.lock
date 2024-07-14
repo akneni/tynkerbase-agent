@@ -2286,7 +2286,7 @@ dependencies = [
 [[package]]
 name = "tynkerbase_universal"
 version = "0.1.0"
-source = "git+https://github.com/akneni/tynkerbase-universal.git?branch=master#3904fab06cb2aa12791895e085bc6b61915b5015"
+source = "git+https://github.com/akneni/tynkerbase-universal.git?branch=master#2def0e2e94f10fe0307eeedf1dc64f651780f370"
 dependencies = [
  "anyhow",
  "bincode",

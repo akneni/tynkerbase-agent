@@ -9,12 +9,9 @@ mod proj_utils;
 use consts::{AGENT_ROOTDIR_PATH, SERVER_ENDPOINT};
 use global_state::{GlobalState, TsGlobalState};
 use tynkerbase_universal::{
-    crypt_utils::{
+    constants::{self as univ_consts, LINUX_TYNKERBASE_PATH}, crypt_utils::{
         self, compression_utils, hash_utils, BinaryPacket 
-    }, 
-    docker_utils, 
-    file_utils::FileCollection,
-    constants as univ_consts,
+    }, docker_utils, file_utils::FileCollection
 };
 use bincode;
 use rocket::{
@@ -26,10 +23,7 @@ use rocket::{
 use rand::{thread_rng, Rng};
 
 use std::{
-    io::{BufReader, BufRead}, 
-    process::{self, Command, Stdio},
-    env,
-    sync::OnceLock,
+    env, io::{BufRead, BufReader}, path::PathBuf, process::{self, Command, Stdio}, sync::OnceLock, time::Duration
 };
 
 // Suppress warning being thrown since OS is only used in release mode
@@ -259,11 +253,14 @@ fn get_daemon_status(#[allow(unused)] apikey: ApiKey) -> Custom<String> {
 
 #[rocket::get("/build-img?<name>")]
 fn build_image(name: &str, #[allow(unused)] apikey: ApiKey) -> Custom<String> {
-    let path = format!("{}/{}", univ_consts::LINUX_TYNKERBASE_PATH, name);
-    let img_name = format!("{}_image", name);
+    let mut path = PathBuf::from(LINUX_TYNKERBASE_PATH);
+    path.push(name);
 
-    docker_utils::build_image(&path, &img_name)
-        .unwrap();
+    let img_name = format!("{}_image", name);
+    let res = docker_utils::build_image(path.to_str().unwrap(), &img_name);
+    if let Err(e) = res {
+        return Custom(Status::InternalServerError, e.to_string());
+    }
 
     Custom(Status::Ok, "success".to_string())
 }
@@ -405,7 +402,15 @@ async fn rocket() -> _ {
     let pass_sha256 = hash_utils::sha256(&password);
     let pass_sha384 = hash_utils::sha384(&password);
 
-    // TODO: Authorize login info here
+    // Authorize login info 
+    let endpoint = format!("{}/auth/login?email={}&pass_sha256={}", SERVER_ENDPOINT, email, pass_sha256);
+    let res = reqwest::get(&endpoint)
+        .await
+        .unwrap();
+    if res.status().as_u16() == 403 {
+        println!("Incorrect authorization.");
+        process::exit(0);
+    }
 
     let mut lock = gstate.write().await;
     lock.tyb_apikey = Some(load_apikey(&email, &pass_sha256, &pass_sha384).await);
