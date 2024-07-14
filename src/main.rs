@@ -20,6 +20,7 @@ use rocket::{
     self,
     launch,
     routes,
+    catchers,
     Request, 
     request::{self, FromRequest},
     outcome::Outcome,
@@ -154,13 +155,13 @@ impl<'a> FromRequest<'a> for ApiKey {
     }
 }
 
-#[rocket::post("/create-proj?<name>")]
+#[rocket::get("/create-proj?<name>")]
 async fn create_proj(name: &str, #[allow(unused)] apikey: ApiKey) -> Custom<String> {
     let res = proj_utils::create_proj(name);
     if let Err(e) = res {
         let e = e.to_string();
         if e.contains("already exists") {
-            return Custom(Status::Conflict, format!("User Already Exists -> {e}"));
+            return Custom(Status::Ok, format!("Project Already Exists -> {e}"));
         }
         return Custom(Status::InternalServerError, e);
     }
@@ -200,7 +201,7 @@ async fn delete_proj(name: &str, #[allow(unused)] apikey: ApiKey) -> Custom<Stri
     Custom(Status::Ok, "success".to_string())
 }
 
-#[rocket::get("/list_projects")]
+#[rocket::get("/list-projects")]
 async fn list_projects(#[allow(unused)] apikey: ApiKey) -> Custom<Vec<u8>> {
     let res = proj_utils::get_proj_names();
     let res = match bincode::serialize(&res) {
@@ -366,6 +367,11 @@ async fn root() -> &'static str {
     "alive"
 }
 
+#[rocket::catch(404)]
+fn handle_404(req: &Request) -> Custom<String> {
+    let body = format!("404: `{}` is not a valid path.", req.uri());
+    Custom(Status::NotFound, body)
+}
 
 fn get_global() -> &'static TsGlobalState {
     GSTATE.get_or_init(|| {
@@ -544,6 +550,7 @@ async fn rocket() -> _ {
     drop(lock);
 
     rocket::custom(figment)
+        .register("/", catchers![handle_404])
         .mount("/", routes![root, identify])
         .mount("/files/proj", routes![
                 create_proj, 
