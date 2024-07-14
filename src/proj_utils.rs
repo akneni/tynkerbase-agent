@@ -40,6 +40,7 @@ pub fn add_files_to_proj(name: &str, files: FileCollection) -> Result<()> {
         if let Err(e) = files.save(&proj_path) {
             return Err(anyhow!("{}", e));
         }
+        return Ok(());
     }
     Err(anyhow!("OS `{}` is unsupported", OS))
 }
