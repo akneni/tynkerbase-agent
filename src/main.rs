@@ -4,6 +4,7 @@ mod tls_utils;
 mod ngrok_utils;
 mod global_state;
 mod diagnostics;
+mod proj_utils;
 
 use consts::{AGENT_ROOTDIR_PATH, SERVER_ENDPOINT};
 use global_state::{GlobalState, TsGlobalState};
@@ -12,7 +13,7 @@ use tynkerbase_universal::{
         self, compression_utils, hash_utils, BinaryPacket 
     }, 
     docker_utils, 
-    proj_utils::{self, FileCollection},
+    file_utils::{self, FileCollection},
     constants as univ_consts,
 };
 use bincode;
