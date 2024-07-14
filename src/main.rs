@@ -249,7 +249,13 @@ async fn purge_projects(name: &str, retries:Option<u32>, #[allow(unused)] apikey
                 success[i] = Ok(());
             }
             else if let Err(e) = res {
-                success[i] = Err(anyhow!("{:?}", e));
+                let e = e.to_string();
+                if e.contains("No such image") || e.contains("No such container") {
+                    success[i] = Ok(());
+                }
+                else {
+                    success[i] = Err(anyhow!("{:?}", e));
+                }
             }
         }
         if success.iter().all(|b| b.is_ok()) {
