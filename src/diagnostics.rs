@@ -1,5 +1,6 @@
 use std::process::Command;
 
+#[allow(unused)]
 struct NodeDiags {
     id: String,
     name: String,
@@ -7,6 +8,7 @@ struct NodeDiags {
     cpu: Option<String>,
 }
 
+#[allow(unused)]
 fn get_manufacturer() -> Option<String> {
     let output = Command::new("sh")
         .arg("-c")
@@ -25,6 +27,7 @@ fn get_manufacturer() -> Option<String> {
     }
 }
 
+#[allow(unused)]
 fn get_cpu_data() {
     let output = Command::new("lscpu")
         .output();

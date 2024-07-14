@@ -13,7 +13,7 @@ use tynkerbase_universal::{
         self, compression_utils, hash_utils, BinaryPacket 
     }, 
     docker_utils, 
-    file_utils::{self, FileCollection},
+    file_utils::FileCollection,
     constants as univ_consts,
 };
 use bincode;

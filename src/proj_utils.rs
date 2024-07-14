@@ -10,8 +10,6 @@ use std::{
 };
 use anyhow::{anyhow, Result};
 
-
-// Agent only
 pub fn create_proj(name: &str) -> Result<String> {
     if OS == "linux" {
         // Ensure project directory exists first
@@ -35,7 +33,6 @@ pub fn create_proj(name: &str) -> Result<String> {
     Err(anyhow!("OS `{}` is unsupported", OS))
 }
 
-// Agent only
 pub fn add_files_to_proj(name: &str, files: FileCollection) -> Result<()> {
     if OS == "linux" {
         let proj_path = format!("{LINUX_TYNKERBASE_PATH}/{name}");
@@ -50,7 +47,6 @@ pub fn add_files_to_proj(name: &str, files: FileCollection) -> Result<()> {
     Err(anyhow!("OS `{}` is unsupported", OS))
 }
 
-// Agent only
 pub fn get_proj_names() -> Vec<String> {
     // traverses the tynkerbase-projects directory to get all the names of all the folders
     // (which should each contain a project)
@@ -71,7 +67,6 @@ pub fn get_proj_names() -> Vec<String> {
     }
 }
 
-// Agent only
 pub fn delete_proj(name: &str) -> Result<()> {
     if OS == "linux" {
         let path = format!("{LINUX_TYNKERBASE_PATH}/{name}");
@@ -85,7 +80,6 @@ pub fn delete_proj(name: &str) -> Result<()> {
     Ok(())
 }
 
-// Agent only
 pub fn clear_proj(name: &str) -> Result<()> {
     let res = delete_proj(name);
     if res.is_err() {
@@ -98,7 +92,6 @@ pub fn clear_proj(name: &str) -> Result<()> {
     Ok(())
 }
 
-// Agent only
 pub fn load_proj_files(name: &str, ignore: Option<&Vec<String>>) -> Result<FileCollection> {
     let path_str = format!("{}/{}", LINUX_TYNKERBASE_PATH, name);
     let empty_vec: Vec<String> = vec![];
