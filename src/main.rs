@@ -352,7 +352,11 @@ async fn build_image(name: &str, #[allow(unused)] apikey: ApiKey) -> Custom<Stri
     path.push(name);
 
     let img_name = format!("{}_image", name);
-    let res = docker_utils::build_image(path.to_str().unwrap(), &img_name);
+    let path_str = match path.to_str() {
+        Some(p) => p,
+        None => return Custom(Status::InternalServerError, "Failed to parse path".to_string()),
+    };
+    let res = docker_utils::build_image(path_str, &img_name);
     if let Err(e) = res.await {
         return Custom(Status::InternalServerError, format!("Failed to delete image -> {}", e));
     }
