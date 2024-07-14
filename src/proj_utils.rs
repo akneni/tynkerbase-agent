@@ -19,7 +19,7 @@ pub fn create_proj(name: &str) -> Result<String> {
         }
 
         root_path.push(name);
-        if !root_path.exists() {
+        if root_path.exists() {
             return Err(anyhow!("Project `{}` already exists", name));
         }
         if let Err(e) = fs::create_dir_all(root_path) {
