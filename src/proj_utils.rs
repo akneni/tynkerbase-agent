@@ -4,28 +4,25 @@ use tynkerbase_universal::{
 };
 
 use std::{
-    env::consts::OS,
-    path::Path,
-    fs,
+    env::consts::OS, fs, path::{Path, PathBuf}
 };
 use anyhow::{anyhow, Result};
 
 pub fn create_proj(name: &str) -> Result<String> {
     if OS == "linux" {
         // Ensure project directory exists first
-        let root_path = Path::new(LINUX_TYNKERBASE_PATH);
+        let mut root_path = PathBuf::from(LINUX_TYNKERBASE_PATH);
         if !root_path.exists() {
-            fs::create_dir_all(root_path)
+            fs::create_dir_all(&root_path)
                 .map_err(|e| anyhow!("Root project directory missing.\
                 Encountered another error when creating them -> {}", e))?;
         }
 
-        let path_str = format!("{LINUX_TYNKERBASE_PATH}/{name}");
-        let path = Path::new(&path_str);
-        if !Path::exists(&path) {
+        root_path.push(name);
+        if !root_path.exists() {
             return Err(anyhow!("Project `{}` already exists", name));
         }
-        if let Err(e) = fs::create_dir(&path) {
+        if let Err(e) = fs::create_dir_all(root_path) {
             return Err(anyhow!("Error creating dir: `{}`", e));
         }
         return Ok(format!("Created `{LINUX_TYNKERBASE_PATH}/{name}`"));

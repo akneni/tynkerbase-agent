@@ -382,12 +382,12 @@ async fn rocket() -> _ {
             process::exit(0);
         }
     }
+
     // Create TynkerBase Directory
     #[cfg(not(debug_assertions))] {
-        let path_str = format!("/{}", univ_consts::LINUX_TYNKERBASE_PATH);
-        let path =  Path::new(&path_str);
+        let path =  Path::new(univ_consts::LINUX_TYNKERBASE_PATH);
         if !path.exists() {
-            if let Err(e) = fs::create_dir(path_str) {
+            if let Err(e) = fs::create_dir_all(path) {
                 if e.to_string().contains("Permission denied") {
                     println!("TynkerBase Agent needs root privileges. Please re-run with `sudo`");
                     std::process::exit(0);
