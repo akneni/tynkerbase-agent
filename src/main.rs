@@ -3,6 +3,7 @@ mod dep_utils;
 mod tls_utils;
 mod ngrok_utils;
 mod global_state;
+mod diagnostics;
 
 use consts::{AGENT_ROOTDIR_PATH, SERVER_ENDPOINT};
 use global_state::{GlobalState, TsGlobalState};
