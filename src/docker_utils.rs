@@ -91,7 +91,8 @@ pub async fn build_image(path: &str, img_name: &str) -> Result<()> {
     Ok(())
 }
 
-pub async fn delete_image(img_name: &str) -> Result<()> {
+pub async fn delete_image(img_name: impl AsRef<str>) -> Result<()> {
+    let img_name = img_name.as_ref();
     let output = Command::new("docker")
         .args(&["rmi", "-f", img_name])
         .output()
@@ -191,7 +192,8 @@ pub async fn pause_container(container_name: &str) -> Result<()> {
     Ok(())
 }
 
-pub async fn delete_container(container_name: &str) -> Result<()>{
+pub async fn delete_container(container_name: impl AsRef<str>) -> Result<()>{
+    let container_name = container_name.as_ref();
     let output = Command::new("docker")
         .args(&["rm", "-f", container_name])
         .output()

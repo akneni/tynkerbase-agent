@@ -218,6 +218,53 @@ async fn list_projects(#[allow(unused)] apikey: ApiKey) -> Custom<Vec<u8>> {
     Custom(Status::Ok, res)
 }
 
+#[rocket::get("/purge-project?<name>&<retries>")]
+async fn purge_projects(name: &str, retries:Option<u32>, #[allow(unused)] apikey: ApiKey) -> Custom<String> {
+    let retries = retries.unwrap_or(2);
+
+    let container_name = format!("{}_container", name);
+    let image_name = format!("{}_image", name);
+
+    let mut success = [false, false];
+    for _ in 0..retries {
+        let mut handles = vec![];
+        if !success[0] {
+            let f = tokio::spawn(docker_utils::delete_container(container_name.clone()));
+            handles.push((f, 0));
+        }
+
+        if !success[1] {
+            let f = tokio::spawn(docker_utils::delete_image(image_name.clone()));
+            handles.push((f, 1));
+        }
+
+        for (h, i) in handles {
+            let res = h.await;
+            if let Ok(Ok(_)) = res {
+                success[i] = true;
+            }
+        }
+        if success.iter().all(|&b| b) {
+            break;
+        }
+    }
+
+    if !success.iter().all(|&b| b) {
+        return Custom(Status::InternalServerError, "Failed to delete images and containers".to_string());
+    }
+
+    if let Err(e) = proj_utils::delete_proj(name) {
+        if !e.to_string().contains("does not exist") {
+            return Custom(
+                Status::InternalServerError, 
+                format!("Failed to delete project files -> {}", e)
+            );
+        }
+    }
+
+    Custom(Status::Ok, "success".to_string())
+}
+
 #[rocket::get("/pull-files?<name>")]
 fn pull_proj_files(name: &str, #[allow(unused)] apikey: ApiKey) -> Custom<Vec<u8>> {
     let fc = match proj_utils::load_proj_files(name, None) {
@@ -592,6 +639,7 @@ async fn rocket() -> _ {
                 delete_proj,
                 pull_proj_files,
                 list_projects,
+                purge_projects,
             ],
         )
         .mount(
