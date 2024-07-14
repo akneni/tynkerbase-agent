@@ -146,12 +146,16 @@ impl<'a> FromRequest<'a> for ApiKey {
     }
 }
 
-#[rocket::get("/create-proj?<name>")]
-async fn create_proj(name: &str, #[allow(unused)] apikey: ApiKey) -> Custom<String> {
+#[rocket::get("/create-proj?<name>&<confirm>")]
+async fn create_proj(name: &str, confirm: Option<bool>, #[allow(unused)] apikey: ApiKey) -> Custom<String> {
+    let confirm = confirm.unwrap_or(true);
     let res = proj_utils::create_proj(name);
     if let Err(e) = res {
         let e = e.to_string();
         if e.contains("already exists") {
+            if !confirm {
+                return Custom(Status::Ok, "success".to_string());
+            }
             return Custom(Status::Ok, format!("Project Already Exists -> {e}"));
         }
         return Custom(Status::InternalServerError, e);
@@ -181,12 +185,16 @@ async fn add_files_to_proj(
     Custom(Status::Ok, "success".to_string())
 }
 
-#[rocket::get("/delete-proj?<name>")]
-async fn delete_proj(name: &str, #[allow(unused)] apikey: ApiKey) -> Custom<String> {
+#[rocket::get("/delete-proj?<name>&<confirm>")]
+async fn delete_proj(name: &str, confirm: Option<bool>, #[allow(unused)] apikey: ApiKey) -> Custom<String> {
+    let confirm = confirm.unwrap_or(true);
     let res = proj_utils::delete_proj(name);
     if let Err(e) = res {
         let e = e.to_string();
         if e.contains("does not exist") {
+            if !confirm {
+                return Custom(Status::Ok, "success".to_string());
+            }
             return Custom(Status::Conflict, format!("Project does not exist -> {e}"));
         }
         return Custom(Status::InternalServerError, e);
@@ -276,10 +284,36 @@ async fn build_image(name: &str, #[allow(unused)] apikey: ApiKey) -> Custom<Stri
     let img_name = format!("{}_image", name);
     let res = docker_utils::build_image(path.to_str().unwrap(), &img_name);
     if let Err(e) = res.await {
-        return Custom(Status::InternalServerError, e.to_string());
+        return Custom(Status::InternalServerError, format!("Failed to delete image -> {}", e));
     }
 
     Custom(Status::Ok, "success".to_string())
+}
+
+#[rocket::get("/delete-img?<name>")]
+async fn delete_image(name: &str, #[allow(unused)] apikey: ApiKey) -> Custom<String> {
+    let mut path = PathBuf::from(LINUX_TYNKERBASE_PATH);
+    path.push(name);
+
+    let img_name = format!("{}_image", name);
+    let res = docker_utils::delete_image(&img_name);
+    if let Err(e) = res.await {
+        return Custom(Status::InternalServerError, format!("Failed to delete image -> {}", e));
+    }
+
+    Custom(Status::Ok, "success".to_string())
+}
+
+#[rocket::get("/list-imgs")]
+async fn list_images(#[allow(unused)] apikey: ApiKey) -> Custom<String> {
+    let lst = docker_utils::list_images().await;
+    match lst {
+        Ok(l) => Custom(Status::Ok, l),
+        Err(e) => Custom(
+            Status::InternalServerError, 
+            format!("Error getting images -> {}", e)
+        ),
+    }
 }
 
 #[rocket::get("/spawn-container?<name>")]
@@ -297,75 +331,41 @@ async fn spawn_container(name: &str, #[allow(unused)] apikey: ApiKey) -> Custom<
     Custom(Status::Ok, "success".to_string())
 }
 
-#[rocket::get("/halt-container?<name>")]
-async fn halt_container(name: &str, #[allow(unused)] apikey: ApiKey) -> Custom<String> {
-    let img_name = format!("{}_image", name);
+#[rocket::get("/pause-container?<name>")]
+async fn pause_container(name: &str, #[allow(unused)] apikey: ApiKey) -> Custom<String> {
     let container_name = format!("{}_container", name);
-
-    if let Err(e) = docker_utils::start_container(&img_name, &container_name, vec![], vec![]).await
-    {
+    if let Err(e) = docker_utils::pause_container(&container_name).await {
         return Custom(
             Status::InternalServerError,
-            format!("Failed to start container -> {e}"),
+            format!("Failed to pause container -> {e}"),
         );
     }
 
     Custom(Status::Ok, "success".to_string())
 }
 
-#[rocket::get("/install-docker")]
-async fn install_docker(#[allow(unused)] apikey: ApiKey) -> TextStream![String] {
-    TextStream! {
-        yield "Installing Docker...\n\n".to_string();
-
-        let cmd = dep_utils::docker::get_install_command().unwrap();
-
-        let mut child = Command::new(cmd[0])
-            .args(&cmd[1..])
-            .stdout(Stdio::piped())
-            .spawn()
-            .expect("Failed to start command");
-
-        let stdout = child.stdout.take();
-        if let Some(stdout) = stdout {
-            let mut reader = BufReader::new(stdout).lines();
-
-            while let Some(Ok(l)) = reader.next() {
-                yield l;
-            }
-            yield "\nFinished docker installation".to_string();
-        }
-        else {
-            yield "Failed to extract stdout from docker install process".to_string();
-        }
+#[rocket::get("/delete-container?<name>")]
+async fn delete_container(name: &str, #[allow(unused)] apikey: ApiKey) -> Custom<String> {
+    let container_name = format!("{}_container", name);
+    if let Err(e) = docker_utils::delete_container(&container_name).await {
+        return Custom(
+            Status::InternalServerError,
+            format!("Failed to delete container -> {e}"),
+        );
     }
+
+    Custom(Status::Ok, "success".to_string())
 }
 
-#[rocket::get("/install-openssl")]
-async fn install_openssl(#[allow(unused)] apikey: ApiKey) -> TextStream![String] {
-    TextStream! {
-        yield "Installing OpenSSL...\n\n".to_string();
-
-        let cmd = dep_utils::openssl::get_install_command().unwrap();
-
-        let mut child = Command::new(cmd[0])
-            .args(&cmd[1..])
-            .stdout(Stdio::piped())
-            .spawn()
-            .expect("Failed to start command");
-
-        let stdout = child.stdout.take();
-        if let Some(stdout) = stdout {
-            let mut reader = BufReader::new(stdout).lines();
-
-            while let Some(Ok(l)) = reader.next() {
-                yield l;
-            }
-            yield "\nFinished OpenSSL installation".to_string();
-        }
-        else {
-            yield "Failed to extract stdout from OpenSSL install process".to_string();
-        }
+#[rocket::get("/list-containers")]
+async fn list_containers(#[allow(unused)] apikey: ApiKey) -> Custom<String> {
+    let lst = docker_utils::list_containers().await;
+    match lst {
+        Ok(l) => Custom(Status::Ok, l),
+        Err(e) => Custom(
+            Status::InternalServerError, 
+            format!("Error getting containers -> {}", e)
+        ),
     }
 }
 
@@ -600,7 +600,14 @@ async fn rocket() -> _ {
         )
         .mount(
             "/docker/proj",
-            routes![build_image, spawn_container, halt_container,],
+            routes![
+                build_image, 
+                delete_image, 
+                list_images, 
+                spawn_container, 
+                pause_container, 
+                delete_container, 
+                list_containers,
+            ],
         )
-        .mount("/dependencies", routes![install_docker, install_openssl,])
 }

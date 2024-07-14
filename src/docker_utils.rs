@@ -76,11 +76,6 @@ pub async fn get_engine_status() -> Result<bool> {
     return Err(anyhow!("OS `{}` not supported.", OS));
 }
 
-pub fn install_docker() -> Result<()> {
-    // TODO: implement this function for the apt and dnf package managers (or in an agnostic manner).
-    Ok(())
-}
-
 pub async fn build_image(path: &str, img_name: &str) -> Result<()> {
     let cmd = Command::new("docker")
         .args(["build", "-t", img_name, "."])
@@ -96,7 +91,23 @@ pub async fn build_image(path: &str, img_name: &str) -> Result<()> {
     Ok(())
 }
 
-pub async fn list_images() -> Result<Vec<String>> {
+pub async fn delete_image(img_name: &str) -> Result<()> {
+    let output = Command::new("docker")
+        .args(&["rmi", "-f", img_name])
+        .output()
+        .await
+        .map_err(|e| anyhow!("Failed to launch docker command -> {e}"))?;
+
+    if !output.status.success() {
+        let err = String::from_utf8(output.stderr)
+            .unwrap_or("Unable to extract stderr".to_string());
+        return Err(anyhow!("Failed to delete image `{}`:\n{}", img_name, err));
+    }
+
+    Ok(())
+}
+
+pub async fn list_images() -> Result<String> {
     // TODO: Test this function
     let cmd = Command::new("docker")
         .arg("images")
@@ -106,24 +117,19 @@ pub async fn list_images() -> Result<Vec<String>> {
 
     let s = String::from_utf8(cmd.stdout).map_err(|e| anyhow!("{e}"))?;
 
-    Ok(s.split("\n").skip(1).map(|s| s.to_string()).collect())
+    Ok(s)
 }
 
-pub async fn list_containers() -> Result<Vec<String>> {
+pub async fn list_containers() -> Result<String> {
     let cmd = Command::new("docker")
         .args(["ps", "-a"])
         .output()
         .await
-        .unwrap();
+        .map_err(|e| anyhow!("Error executing list_containers docker command -> {}", e))?;
 
-    let containers = String::from_utf8(cmd.stdout)
-        .unwrap()
-        .split("\n")
-        .skip(1)
-        .map(|s| s.to_string())
-        .collect();
 
-    Ok(containers)
+    String::from_utf8(cmd.stdout)
+        .map_err(|e| anyhow!("Error extracting stdout -> {}", e))
 }
 
 pub async fn start_container(
@@ -169,15 +175,33 @@ pub async fn start_container(
     Ok(())
 }
 
-pub async fn halt_container(container_name: &str) -> Result<()> {
-    let status = Command::new("docker")
+pub async fn pause_container(container_name: &str) -> Result<()> {
+    let output = Command::new("docker")
         .args(&["stop", container_name])
-        .status()
+        .output()
         .await
-        .map_err(|e| anyhow!("Failed to launch docker command {e}"))?;
+        .map_err(|e| anyhow!("Failed to launch docker command -> {e}"))?;
 
-    if !status.success() {
-        return Err(anyhow!("Failed to stop container: {}", container_name));
+    if !output.status.success() {
+        let err = String::from_utf8(output.stderr)
+            .unwrap_or("Unable to extract stderr".to_string());
+        return Err(anyhow!("Failed to stop container `{}`:\n{}", container_name, err));
+    }
+
+    Ok(())
+}
+
+pub async fn delete_container(container_name: &str) -> Result<()>{
+    let output = Command::new("docker")
+        .args(&["rm", "-f", container_name])
+        .output()
+        .await
+        .map_err(|e| anyhow!("Failed to launch docker command -> {e}"))?;
+
+    if !output.status.success() {
+        let err = String::from_utf8(output.stderr)
+            .unwrap_or("Unable to extract stderr".to_string());
+        return Err(anyhow!("Failed to delete container `{}`:\n{}", container_name, err));
     }
 
     Ok(())
