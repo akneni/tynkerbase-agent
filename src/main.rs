@@ -17,20 +17,10 @@ use tynkerbase_universal::{
 };
 use bincode;
 use rocket::{
-    self,
-    launch,
-    routes,
-    catchers,
-    Request, 
-    request::{self, FromRequest},
-    outcome::Outcome,
-    response::{
+    self, catchers, config::{Config, TlsConfig}, data::{Limits, ToByteUnit}, figment::Figment, http::Status, launch, outcome::Outcome, request::{self, FromRequest}, response::{
         status::Custom,
         stream::TextStream,
-    },
-    http::Status,
-    config::{Config, TlsConfig},
-    figment::Figment,
+    }, routes, Request
 };
 use rand::{thread_rng, Rng};
 
@@ -540,6 +530,8 @@ async fn rocket() -> _ {
         address: "0.0.0.0".parse().expect("Invalid address"),
         port: 7462,
         tls: Some(TlsConfig::from_paths(&tls_paths[0], &tls_paths[1])),
+        limits: Limits::default()
+            .limit("bytes", 20.megabytes()),
         ..Config::default()
     };
     let figment = Figment::from(config);
