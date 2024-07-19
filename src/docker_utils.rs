@@ -122,20 +122,20 @@ pub async fn list_images() -> Result<String> {
 }
 
 pub async fn list_containers() -> Result<String> {
-    let cmd = Command::new("docker")
-        .args(["ps", "-a"])
+    let output = Command::new("docker")
+        .args(["ps", "-a", "--format", "table {{.ID}}\t{{.Image}}\t{{.Command}}\t{{.CreatedAt}}\t{{.Status}}\t{{.Ports}}\t{{.Names}}"])
         .output()
         .await
-        .map_err(|e| anyhow!("Error executing list_containers docker command -> {}", e))?;
+        .map_err(|e| anyhow!("Error executing list_containers docker command [fn list_containers] -> {}", e))?;
 
 
-    String::from_utf8(cmd.stdout)
-        .map_err(|e| anyhow!("Error extracting stdout -> {}", e))
+    String::from_utf8(output.stdout)
+        .map_err(|e| anyhow!("Error extracting stdout [fn list_containers] -> {}", e))
 }
 
 pub async fn list_container_stats() -> Result<String> {
     let output = Command::new("docker")
-        .args(["stats", "--no-stream"])
+        .args(["stats", "--no-stream", "--format", "table {{.Container}}\t{{.CPUPerc}}\t{{.MemUsage}}\t{{.MemPerc}}\t{{.NetIO}}\t{{.BlockIO}}\t{{.PIDs}}"])
         .output()
         .await
         .map_err(|e| anyhow!("Error executing `docker stats` command [fn list_container_stats] => {}", e))?;
