@@ -6,7 +6,3 @@ target/*
 
 .vscode
 keys/*
-
-# Include precompiled binary
-!target/release/
-!target/release/tynkerbase-agent

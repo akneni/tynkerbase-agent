@@ -21,7 +21,7 @@ use rocket::{
     launch,
     outcome::Outcome,
     request::{self, FromRequest},
-    response::{status::Custom, stream::TextStream},
+    response::status::Custom,
     routes, Request,
 };
 use tynkerbase_universal::{
@@ -32,9 +32,8 @@ use tynkerbase_universal::{
 
 use std::{
     env,
-    io::{BufRead, BufReader},
+    process,
     path::PathBuf,
-    process::{self, Command, Stdio},
     sync::OnceLock,
 };
 
@@ -460,6 +459,18 @@ async fn list_containers(#[allow(unused)] apikey: ApiKey) -> Custom<String> {
     }
 }
 
+#[rocket::get("/list-container-stats")]
+async fn list_container_stats(#[allow(unused)] apikey: ApiKey) -> Custom<String> {
+    let lst = docker_utils::list_container_stats().await;
+    match lst {
+        Ok(l) => Custom(Status::Ok, l),
+        Err(e) => Custom(
+            Status::InternalServerError, 
+            format!("Error getting containers -> {}", e)
+        ),
+    }
+}
+
 #[rocket::get("/get-id")]
 async fn identify(#[allow(unused)] apikey: ApiKey) -> String {
     let gstate = get_global();
@@ -701,6 +712,7 @@ async fn rocket() -> _ {
                 pause_container, 
                 delete_container, 
                 list_containers,
+                list_container_stats,
             ],
         )
 }

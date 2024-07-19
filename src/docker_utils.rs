@@ -133,6 +133,26 @@ pub async fn list_containers() -> Result<String> {
         .map_err(|e| anyhow!("Error extracting stdout -> {}", e))
 }
 
+pub async fn list_container_stats() -> Result<String> {
+    let output = Command::new("docker")
+        .args(["stats", "--no-stream"])
+        .output()
+        .await
+        .map_err(|e| anyhow!("Error executing `docker stats` command [fn list_container_stats] => {}", e))?;
+
+    if !output.status.success() {
+        let err = String::from_utf8(output.stderr).unwrap_or("unable to extract stderr".to_string());
+        return Err(anyhow!("`docker stats` command returned non 0 exit code [fn list_container_stats] -> {}", err));
+    }
+
+    match String::from_utf8(output.stdout) {
+        Ok(output) => Ok(output),
+        Err(e) => {
+            Err(anyhow!("Failed to extract text from stdout [fn list_container_stats] -> {}", e))
+        }
+    }
+}
+
 pub async fn start_container(
     img_name: &str,
     container_name: &str,
