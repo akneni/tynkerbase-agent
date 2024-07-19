@@ -418,6 +418,23 @@ async fn pause_container(name: &str, #[allow(unused)] apikey: ApiKey) -> Custom<
     Custom(Status::Ok, "success".to_string())
 }
 
+#[rocket::get("/gen-diags")]
+async fn get_diags(#[allow(unused)] apikey: ApiKey) -> Custom<String> {
+    let gstate = get_global();
+    let lock = gstate.read().await;
+
+    let diags = diagnostics::measure(lock.node_id.as_ref().unwrap(), lock.name.as_ref().unwrap());
+
+    match serde_json::to_string(&diags) {
+        Ok(json) => {
+            Custom(Status::Ok, json)
+        }
+        Err(e) => {
+            Custom(Status::InternalServerError, format!("Error serializing diagnostics: {:?}", e))
+        }
+    }
+}
+
 #[rocket::get("/delete-container?<name>")]
 async fn delete_container(name: &str, #[allow(unused)] apikey: ApiKey) -> Custom<String> {
     let container_name = format!("{}_container", name);
@@ -658,6 +675,7 @@ async fn rocket() -> _ {
     rocket::custom(figment)
         .register("/", catchers![handle_404])
         .mount("/", routes![root, identify])
+        .mount("/diags", routes![get_diags])
         .mount(
             "/files/proj",
             routes![
