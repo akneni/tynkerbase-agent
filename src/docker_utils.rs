@@ -135,7 +135,7 @@ pub async fn list_containers() -> Result<String> {
 
 pub async fn list_container_stats() -> Result<String> {
     let output = Command::new("docker")
-        .args(["stats", "--no-stream", "--format", "table {{.Container}}\t{{.CPUPerc}}\t{{.MemUsage}}\t{{.MemPerc}}\t{{.NetIO}}\t{{.BlockIO}}\t{{.PIDs}}"])
+        .args(["stats", "--no-stream", "--format", "table {{.ID}}\t{{.Container}}\t{{.CPUPerc}}\t{{.MemUsage}}\t{{.MemPerc}}\t{{.NetIO}}\t{{.BlockIO}}\t{{.PIDs}}"])
         .output()
         .await
         .map_err(|e| anyhow!("Error executing `docker stats` command [fn list_container_stats] => {}", e))?;
