@@ -96,7 +96,7 @@ async fn load_node_info(email: &str, pass_sha256: &str) -> (String, String) {
     let mut path_str = format!("{}/data", AGENT_ROOTDIR_PATH);
     let path = Path::new(&path_str);
     if !path.exists() {
-        fs::create_dir(&path).unwrap();
+        fs::create_dir_all(&path).unwrap();
     }
     path_str.push_str("/node-info.bin");
     let path = Path::new(&path_str);

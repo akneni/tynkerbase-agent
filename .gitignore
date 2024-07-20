@@ -3,6 +3,7 @@ target/release/*
 target/debug/
 target/debug/*
 target/*
+data
 
 .vscode
 keys/*
