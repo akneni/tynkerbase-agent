@@ -78,16 +78,16 @@ async fn get_cpu_data(diags: Arc<Mutex<NodeDiags>>) {
             lock.cpu = Some(extract_from_line(line));
         }
         else if line.starts_with("L1d") {
-            lock.cpu = Some(extract_from_line(line));
+            lock.l1_cache_d = Some(extract_from_line(line));
         }
         else if line.starts_with("L1i") {
-            lock.cpu = Some(extract_from_line(line));
+            lock.l1_cache_i = Some(extract_from_line(line));
         }
         else if line.starts_with("L2") {
-            lock.cpu = Some(extract_from_line(line));
+            lock.l2_cache = Some(extract_from_line(line));
         }
         else if line.starts_with("L3") {
-            lock.cpu = Some(extract_from_line(line));
+            lock.l3_cache = Some(extract_from_line(line));
         }
     }
 }
@@ -122,7 +122,7 @@ fn get_mem_data(diags: Arc<Mutex<NodeDiags>>) {
                     .to_string()
                     .parse::<usize>()
                     .unwrap();
-                lock.mem_total = Some(num as f64 / 1_000_000.);
+                lock.mem_free = Some(num as f64 / 1_000_000.);
                 num_added += 1;
             }
             if num_added > 2 {
