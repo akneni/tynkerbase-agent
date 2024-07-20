@@ -417,14 +417,14 @@ async fn pause_container(name: &str, #[allow(unused)] apikey: ApiKey) -> Custom<
     Custom(Status::Ok, "success".to_string())
 }
 
-#[rocket::get("/gen-diags")]
+#[rocket::get("/get-diags")]
 async fn get_diags(#[allow(unused)] apikey: ApiKey) -> Custom<String> {
     let gstate = get_global();
     let lock = gstate.read().await;
 
     let diags = diagnostics::measure(lock.node_id.as_ref().unwrap(), lock.name.as_ref().unwrap());
 
-    match serde_json::to_string(&diags) {
+    match serde_json::to_string(&diags.await) {
         Ok(json) => {
             Custom(Status::Ok, json)
         }

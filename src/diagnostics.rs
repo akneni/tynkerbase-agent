@@ -1,21 +1,18 @@
 use tynkerbase_universal::netwk_utils::NodeDiags;
 use std::{fs, ops::Deref, sync::{Arc, Mutex}};
-use tokio::{process::Command, runtime::Runtime};
+use tokio::process::Command;
 
 
 
-pub fn measure(node_id: &str, name: &str) -> NodeDiags {
-    let rt = Runtime::new().unwrap();
-
+pub async fn measure(node_id: &str, name: &str) -> NodeDiags {
     let nd: Arc<Mutex<NodeDiags>> = Arc::new(Mutex::new(NodeDiags::new(node_id, name)));
 
-    let f1 = get_cpu_data(nd.clone());
-    let f2 = get_manufacturer(nd.clone());
+    tokio::join!(
+        get_cpu_data(nd.clone()),
+        get_manufacturer(nd.clone()),
+    );
     get_mem_data(nd.clone());
     
-    rt.block_on(f1);
-    rt.block_on(f2);
-
     let lock = nd.lock().unwrap();
 
     lock.deref().clone()

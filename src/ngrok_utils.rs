@@ -194,6 +194,7 @@ pub async fn make_public<T: AsRef<str>>(
     let endpoint =
         format!("{SERVER_ENDPOINT}/ngrok/add-addr?email={email}&pass_sha256={pass_sha256}");
 
+    #[allow(unused)]
     let res = reqwest::Client::new()
         .post(&endpoint)
         .body(bin)
