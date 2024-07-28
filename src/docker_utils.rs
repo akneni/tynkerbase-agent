@@ -156,8 +156,8 @@ pub async fn list_container_stats() -> Result<String> {
 pub async fn start_container(
     img_name: &str,
     container_name: &str,
-    ports: Vec<(u16, u16)>,
-    volumes: Vec<(&str, &str)>,
+    ports: &Vec<[u16; 2]>,
+    volumes: &Vec<[String; 2]>,
 ) -> Result<()> {
     let mut args = vec![
         "run".to_string(),
@@ -166,14 +166,14 @@ pub async fn start_container(
         container_name.to_string(),
     ];
 
-    for (p1, p2) in ports {
+    for p in ports {
         args.push("-p".to_string());
-        args.push(format!("{}:{}", p1, p2));
+        args.push(format!("{}:{}", p[0], p[1]));
     }
 
-    for (v1, v2) in volumes {
+    for v in volumes {
         args.push("-v".to_string());
-        args.push(format!("{}:{}", v1, v2));
+        args.push(format!("{}:{}", &v[0], &v[1]));
     }
 
     args.push(img_name.to_string());

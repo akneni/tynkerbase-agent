@@ -9,25 +9,30 @@ mod tls_utils;
 
 use anyhow::anyhow;
 use bincode;
-use consts::{AGENT_ROOTDIR_PATH, SERVER_ENDPOINT};
+use consts::{AGENT_ROOTDIR_PATH, SERVER_ENDPOINT, CONTAINER_MOD, IMAGE_MOD};
 use global_state::{GlobalState, TsGlobalState};
 use rand::{thread_rng, Rng};
 use rocket::{
-    self, catchers,
-    config::{Config, TlsConfig},
-    data::{Limits, ToByteUnit},
-    figment::Figment,
-    http::Status,
-    launch,
-    outcome::Outcome,
-    request::{self, FromRequest},
-    response::status::Custom,
-    routes, Request,
+    self, 
+    catchers, 
+    config::{Config, TlsConfig}, 
+    data::{Limits, ToByteUnit}, 
+    figment::Figment, 
+    http::Status, 
+    launch, 
+    outcome::Outcome, 
+    request::{self, FromRequest}, 
+    response::status::Custom, 
+    routes, 
+    Request,
 };
+
 use tynkerbase_universal::{
     constants::LINUX_TYNKERBASE_PATH,
     crypt_utils::{self, compression_utils, hash_utils, BinaryPacket},
     file_utils::FileCollection,
+    netwk_utils::ProjConfig,
+
 };
 
 use std::{
@@ -222,8 +227,8 @@ async fn list_projects(#[allow(unused)] apikey: ApiKey) -> Custom<Vec<u8>> {
 async fn purge_projects(name: &str, retries:Option<u32>, #[allow(unused)] apikey: ApiKey) -> Custom<String> {
     let retries = retries.unwrap_or(2);
 
-    let container_name = format!("{}_container", name);
-    let image_name = format!("{}_image", name);
+    let container_name = format!("{}{CONTAINER_MOD}", name);
+    let image_name = format!("{}{IMAGE_MOD}", name);
 
     let mut success: [anyhow::Result<()>; 2] = [
         Err(anyhow!("unknown error deleting container")),
@@ -350,7 +355,7 @@ async fn build_image(name: &str, #[allow(unused)] apikey: ApiKey) -> Custom<Stri
     let mut path = PathBuf::from(LINUX_TYNKERBASE_PATH);
     path.push(name);
 
-    let img_name = format!("{}_image", name);
+    let img_name = format!("{}{IMAGE_MOD}", name);
     let path_str = match path.to_str() {
         Some(p) => p,
         None => return Custom(Status::InternalServerError, "Failed to parse path".to_string()),
@@ -368,7 +373,7 @@ async fn delete_image(name: &str, #[allow(unused)] apikey: ApiKey) -> Custom<Str
     let mut path = PathBuf::from(LINUX_TYNKERBASE_PATH);
     path.push(name);
 
-    let img_name = format!("{}_image", name);
+    let img_name = format!("{}{IMAGE_MOD}", name);
     let res = docker_utils::delete_image(&img_name);
     if let Err(e) = res.await {
         return Custom(Status::InternalServerError, format!("Failed to delete image -> {}", e));
@@ -389,12 +394,21 @@ async fn list_images(#[allow(unused)] apikey: ApiKey) -> Custom<String> {
     }
 }
 
-#[rocket::get("/spawn-container?<name>")]
-async fn spawn_container(name: &str, #[allow(unused)] apikey: ApiKey) -> Custom<String> {
-    let img_name = format!("{}_image", name);
-    let container_name = format!("{}_container", name);
-    if let Err(e) = docker_utils::start_container(&img_name, &container_name, vec![], vec![]).await
-    {
+#[rocket::post("/spawn-container", data="<data>")]
+async fn spawn_container(data: Vec<u8>, #[allow(unused)] apikey: ApiKey) -> Custom<String> {
+    let data: ProjConfig = bincode::deserialize(&data).unwrap();
+
+    let img_name = format!("{}{IMAGE_MOD}", &data.proj_name);
+    let container_name = format!("{}{CONTAINER_MOD}", &data.proj_name);
+
+    let f = docker_utils::start_container(
+        &img_name, 
+        &container_name, 
+        &data.port_mapping, 
+        &data.volume_mapping
+    );
+
+    if let Err(e) = f.await {
         return Custom(
             Status::InternalServerError,
             format!("Failed to start container -> {e}"),
@@ -406,7 +420,7 @@ async fn spawn_container(name: &str, #[allow(unused)] apikey: ApiKey) -> Custom<
 
 #[rocket::get("/pause-container?<name>")]
 async fn pause_container(name: &str, #[allow(unused)] apikey: ApiKey) -> Custom<String> {
-    let container_name = format!("{}_container", name);
+    let container_name = format!("{}{CONTAINER_MOD}", name);
     if let Err(e) = docker_utils::pause_container(&container_name).await {
         return Custom(
             Status::InternalServerError,
@@ -436,7 +450,7 @@ async fn get_diags(#[allow(unused)] apikey: ApiKey) -> Custom<String> {
 
 #[rocket::get("/delete-container?<name>")]
 async fn delete_container(name: &str, #[allow(unused)] apikey: ApiKey) -> Custom<String> {
-    let container_name = format!("{}_container", name);
+    let container_name = format!("{}{CONTAINER_MOD}", name);
     if let Err(e) = docker_utils::delete_container(&container_name).await {
         return Custom(
             Status::InternalServerError,
