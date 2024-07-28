@@ -55,6 +55,11 @@ async fn load_apikey(email: &str, pass_sha256: &str, pass_sha384: &str) -> Strin
 
     let res = reqwest::get(&endpoint).await.unwrap();
 
+    if !res.status().is_success() {
+        println!("Error: Failed to login to server: {:?}", res);
+        process::exit(1);
+    }
+
     let salt = res
         .text()
         .await
