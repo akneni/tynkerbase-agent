@@ -46,15 +46,7 @@ use std::{
 #[allow(unused_imports)]
 use std::{env::consts::OS, fs, path::Path};
 
-async fn load_apikey(email: &str, pass_sha256: &str, pass_sha384: &str) -> String {
-    const ENDPOINT: &str = "https://tynkerbase-server.shuttleapp.rs";
-    let endpoint = format!(
-        "{}/auth/login?email={}&pass_sha256={}",
-        ENDPOINT, &email, &pass_sha256
-    );
-
-    let res = reqwest::get(&endpoint).await.unwrap();
-
+async fn load_apikey(res: reqwest::Response, pass_sha384: &str) -> String {
     if !res.status().is_success() {
         println!("Error: Failed to login to server: {:#?}", res);
         process::exit(1);
@@ -151,9 +143,7 @@ impl<'a> FromRequest<'a> for ApiKey {
                     return Outcome::Success(ApiKey(key.to_string()));
                 }
                 #[cfg(debug_assertions)] {
-                    // TEMP ->  REMOVE BEFORE PRODUCTION
-                    println!("\n\nAUTH ERROR: key `{key}` is invalid.\n\
-                    The correct key is `{actual_key}`\n\n");
+                    println!("\n\nAUTH ERROR: key `{}...` is invalid.\n", &key[..10]);
                 }
                 Outcome::Error((Status::Forbidden, ()))
             }
@@ -569,7 +559,7 @@ async fn rocket() -> _ {
     }
 
     let mut lock = gstate.write().await;
-    lock.tyb_apikey = Some(load_apikey(&email, &pass_sha256, &pass_sha384).await);
+    lock.tyb_apikey = Some(load_apikey(res, &pass_sha384).await);
     let (node_id, name) = load_node_info(&email, &pass_sha256).await;
     lock.node_id = Some(node_id);
     lock.name = Some(name);
