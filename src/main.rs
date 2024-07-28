@@ -28,7 +28,7 @@ use rocket::{
 };
 
 use tynkerbase_universal::{
-    constants::LINUX_TYNKERBASE_PATH,
+    constants::{LINUX_TYNKERBASE_PATH, TYB_APIKEY_HTTP_HEADER},
     crypt_utils::{self, compression_utils, hash_utils, BinaryPacket},
     file_utils::FileCollection,
     netwk_utils::ProjConfig,
@@ -137,16 +137,27 @@ impl<'a> FromRequest<'a> for ApiKey {
     type Error = ();
 
     async fn from_request(req: &'a Request<'_>) -> request::Outcome<Self, Self::Error> {
-        match req.headers().get_one("tyb-api-key") {
+        match req.headers().get_one(TYB_APIKEY_HTTP_HEADER) {
             Some(key) => {
                 let gstate = get_global();
                 let lock = gstate.read().await;
-                if key == (lock.tyb_apikey.as_ref().unwrap()) {
+                let actual_key = lock.tyb_apikey.as_ref().unwrap();
+                if key == actual_key {
                     return Outcome::Success(ApiKey(key.to_string()));
+                }
+                #[cfg(debug_assertions)] {
+                    // TEMP ->  REMOVE BEFORE PRODUCTION
+                    println!("\n\nAUTH ERROR: key `{key}` is invalid.\n\
+                    The correct key is `{actual_key}`\n\n");
                 }
                 Outcome::Error((Status::Forbidden, ()))
             }
-            _ => Outcome::Error((Status::Forbidden, ())),
+            _ => {
+                #[cfg(debug_assertions)] {
+                    println!("\n\nAUTH ERROR: No API key provided.\n\n")
+                }
+                Outcome::Error((Status::Forbidden, ()))
+            },
         }
     }
 }
