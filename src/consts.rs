@@ -12,5 +12,5 @@ const fn get_proj_path() -> &'static str {
 
 pub const AGENT_ROOTDIR_PATH: &str = get_proj_path();
 pub const SERVER_ENDPOINT: &str = "https://tynkerbase-server.shuttleapp.rs";
-pub const CONTAINER_MOD: &str = "__TYB_container";
-pub const IMAGE_MOD: &str = "__TYB_image";
+pub const CONTAINER_MOD: &str = "__tyb_container";
+pub const IMAGE_MOD: &str = "__tyb_image";

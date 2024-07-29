@@ -224,7 +224,7 @@ pub async fn delete_container(container_name: impl AsRef<str>) -> Result<()>{
         let err = String::from_utf8(output.stderr)
             .unwrap_or("Unable to extract stderr".to_string());
         let err = anyhow!("Failed to delete container `{}`:\n{}", container_name, err);
-        println!("{:#?}", err);
+        #[cfg(debug_assertions)] println!("{:#?}", err);
         return Err(err);
     }
 
